@@ -140,12 +140,55 @@ Run `python main.py` from the project root folder, the same folder that contains
 **Window opens, but spinbox arrows or checkboxes look wrong**  
 Make sure the `app/icons/` folder was downloaded: `up.png`, `down.png`, `check.png`.
 
-## Notes
+## Usage notes
 
-- Visual list order and `uid` / `id` are updated when you reorder entries.
-- `order` and `insertion_order` come only from the Insertion Order field.
-- Token count is an estimate (`characters / 4`).
-- `addMemo` is written as `true` automatically.
+### File format
+
+- The program saves `entries` as an object with string keys: `"1"`, `"2"`, `"3"`.
+- If you open an older lorebook where `entries` is a list, it is converted to this object format.
+- This is the normal format for SillyTavern.
+- Some websites may change the file after upload and download. That is not controlled by this program.
+
+### Name and comment
+
+- `name` and `comment` are always kept the same.
+- The program uses `name` first. If `name` is empty, it uses `comment`.
+- This is required because some editors show `name` and others show `comment`.
+
+### Entry order
+
+- The order in the left list is the order written into the saved JSON.
+- Moving entries also updates dictionary keys, `uid`, and `id`.
+- `Insertion Order` is not changed by moving entries. You set it yourself.
+- `order` and `insertion_order` always come from the Insertion Order field.
+
+### Import and new entries
+
+- On import, existing values in the file are not overwritten.
+- Settings values are applied only to missing fields.
+- A new entry (`+`) uses the current Settings values.
+
+### Search and preview
+
+- Search looks through name, keywords, secondary keywords, and content.
+- Markdown Preview follows normal Markdown rules: a single line break does not start a new paragraph. Use a blank line for a new paragraph.
+
+### Other fields
+
+- Token count is an estimate: characters / 4. It is not a model tokenizer.
+- `Enabled` turns the entry on.
+- `Disable` is a compatibility field for some editors. Leave it off unless you need it.
+- `addMemo` is always written as `true`. It does not control activation.
+
+### Settings file
+
+- After you save Settings, the program creates `settings.json` next to the app.
+- Do not commit `settings.json` to git. It is a local file.
+
+### Compatibility
+
+- The program is made for SillyTavern and Chub lorebook JSON files.
+- If a website returns a different file after download, that change comes from the website.
 
 ## License
 
