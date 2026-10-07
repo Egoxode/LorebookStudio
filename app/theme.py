@@ -134,6 +134,6 @@ QListWidget::item {{
 QListWidget::item:selected {{
     background: #6a5acd;
     color: white;
-    border: 2px solid #8f7cff;
+    border: 1px solid #8f7cff;
 }}
 '''

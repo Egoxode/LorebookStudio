@@ -1,2 +1,4 @@
 from app.main_window import run
-run()
+
+if __name__ == "__main__":
+    run()

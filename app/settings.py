@@ -25,6 +25,31 @@ DEFAULTS = {
 }
 
 
+# Диапазоны полей. Общие для редактора и окна настроек: значения из чужих файлов
+# не должны молча обрезаться при редактировании записи.
+RANGES = {
+    "insertion_order": (0, 99999),
+    "priority": (0, 99999),
+    "depth": (0, 999),
+    "probability": (0, 100),
+}
+
+
+# Режимы Selective Logic в SillyTavern: значение поля = индекс в списке.
+SELECTIVE_LOGIC = ["AND ANY", "NOT ALL", "NOT ANY", "AND ALL"]
+SELECTIVE_LOGIC_HINT = (
+    "Which secondary keywords must match. AND ANY: at least one matches. NOT ALL: not all of them match. "
+    "NOT ANY: none of them match. AND ALL: all of them match. Ignored if Selective is off."
+)
+
+
+def _as_int(value, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def settings_path() -> Path:
     return Path(__file__).resolve().parent.parent / "settings.json"
 
@@ -99,25 +124,25 @@ class SettingsDialog(QDialog):
         self.new_entry_name.setText(str(self.settings.get("new_entry_name", "New Entry")))
 
         self.insertion_order = QSpinBox()
-        self.insertion_order.setRange(0, 9999)
-        self.insertion_order.setValue(int(self.settings.get("insertion_order", 100)))
+        self.insertion_order.setRange(*RANGES["insertion_order"])
+        self.insertion_order.setValue(_as_int(self.settings.get("insertion_order", 100), 100))
 
         self.priority = QSpinBox()
-        self.priority.setRange(0, 999)
-        self.priority.setValue(int(self.settings.get("priority", 10)))
+        self.priority.setRange(*RANGES["priority"])
+        self.priority.setValue(_as_int(self.settings.get("priority", 10), 10))
 
         self.depth = QSpinBox()
-        self.depth.setRange(0, 99)
-        self.depth.setValue(int(self.settings.get("depth", 0)))
+        self.depth.setRange(*RANGES["depth"])
+        self.depth.setValue(_as_int(self.settings.get("depth", 0), 0))
 
         self.probability = QSpinBox()
-        self.probability.setRange(0, 100)
-        self.probability.setValue(int(self.settings.get("probability", 100)))
+        self.probability.setRange(*RANGES["probability"])
+        self.probability.setValue(_as_int(self.settings.get("probability", 100), 100))
 
         self.selective_logic = QComboBox()
-        self.selective_logic.addItems(["AND", "NOT"])
-        idx = int(self.settings.get("selectiveLogic", 0))
-        self.selective_logic.setCurrentIndex(0 if idx not in (0, 1) else idx)
+        self.selective_logic.addItems(SELECTIVE_LOGIC)
+        idx = _as_int(self.settings.get("selectiveLogic", 0), 0)
+        self.selective_logic.setCurrentIndex(idx if 0 <= idx < len(SELECTIVE_LOGIC) else 0)
 
         self.enabled = QCheckBox()
         self.enabled.setChecked(bool(self.settings.get("enabled", True)))
@@ -141,7 +166,7 @@ class SettingsDialog(QDialog):
             ("Non-recursable", self.exclude_recursion, "Prevent this entry from being activated by other lorebook entries."),
             ("Priority", self.priority, "If the token budget is reached, lower priority is discarded first."),
             ("Selective", self.selective, "Require both keywords and secondary keywords to trigger the entry."),
-            ("Selective Logic", self.selective_logic, "AND includes secondary keys, NOT excludes them. Ignored if Selective is off."),
+            ("Selective Logic", self.selective_logic, SELECTIVE_LOGIC_HINT),
             ("Constant", self.constant, "Always trigger this entry (within the token budget)."),
             ("Probability", self.probability, "Percent chance the content is activated when the entry is triggered."),
             ("Depth", self.depth, "How many recent messages to scan for keywords."),

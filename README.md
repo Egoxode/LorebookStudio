@@ -2,7 +2,7 @@
 
 Desktop editor for SillyTavern / Chub lorebook JSON files.
 
-Version **1.0**
+Version **1.0.1** ([changelog](CHANGELOG.md))
 
 Lorebook Studio was made for convenient editing of lorebooks. You can freely use, copy, and modify this program.
 
@@ -14,7 +14,8 @@ This project was edited with an AI assistant. Read the code before you rely on i
 
 - Open and save lorebooks in dict format (`entries` as an object keyed by UID)
 - Convert legacy list-format lorebooks on import
-- Create, clone, delete, and reorder entries
+- Create, clone (the copy is placed right after the original), delete (with confirmation), and reorder entries
+- All four SillyTavern `Selective Logic` modes: AND ANY, NOT ALL, NOT ANY, AND ALL
 - Drag and drop to change entry order
 - Manual `Insertion Order` (not overwritten by list position)
 - `name` and `comment` stay in sync for editor compatibility
@@ -158,14 +159,14 @@ Make sure the `app/icons/` folder was downloaded: `up.png`, `down.png`, `check.p
 ### Entry order
 
 - The order in the left list is the order written into the saved JSON.
-- Moving entries also updates dictionary keys, `uid`, and `id`.
+- Moving entries also updates dictionary keys, `uid`, `id`, and `displayIndex` (if the entry has it).
 - `Insertion Order` is not changed by moving entries. You set it yourself.
 - `order` and `insertion_order` always come from the Insertion Order field.
 
 ### Import and new entries
 
-- On import, existing values in the file are not overwritten.
-- Settings values are applied only to missing fields.
+- On import, existing values in the file are kept. Settings values are applied only to missing fields.
+- Fields that duplicate each other are made consistent: `name`/`comment`, `key`/`keys`, `keysecondary`/`secondary_keys`, `order`/`insertion_order`, `enabled`/`disable`.
 - A new entry (`+`) uses the current Settings values.
 
 ### Search and preview
@@ -175,9 +176,11 @@ Make sure the `app/icons/` folder was downloaded: `up.png`, `down.png`, `check.p
 
 ### Other fields
 
+- Keywords are entered separated by commas. If you do not touch the keyword field, keys that contain a comma inside are kept exactly as they were.
+- A `Selective Logic` value outside 0-3 (from an unusual file) is shown as an empty field and kept unchanged unless you pick a mode.
 - Token count is an estimate: characters / 4. It is not a model tokenizer.
 - `Enabled` turns the entry on.
-- `Disable` is a compatibility field for some editors. Leave it off unless you need it.
+- `Disable` is the SillyTavern counterpart of `Enabled`. The editor keeps them in sync (`disable = not enabled`), so a disabled entry is really off in both SillyTavern and Chub.
 - `addMemo` is always written as `true`. It does not control activation.
 
 ### Settings file
