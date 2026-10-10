@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.2
+
+### Added
+- `LorebookStudio.pyw`: double-click to start without a console window (Windows). Errors are shown in a message box and written to `error.log`.
+
+### Changed
+- Author name in the window title and in the license corrected to Egoxode.
+
+### Fixed
+- Data change on save: saving the file, or editing any field of an entry, rewrote the whole entry from the editor fields. Windows line endings (`\r\n`) and no-break spaces in the content were replaced, and numbers outside the field range were clamped (for example `order` 150000 became 99999). Now only the fields you change are written; the others keep the exact values from the file.
+
 ## 1.0.1
 
 ### Added

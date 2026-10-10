@@ -2,7 +2,7 @@
 
 Desktop editor for SillyTavern / Chub lorebook JSON files.
 
-Version **1.0.1** ([changelog](CHANGELOG.md))
+Version **1.0.2** ([changelog](CHANGELOG.md))
 
 Lorebook Studio was made for convenient editing of lorebooks. You can freely use, copy, and modify this program.
 
@@ -110,6 +110,10 @@ or:
 py main.py
 ```
 
+### Run without a console window (Windows)
+
+Double-click `LorebookStudio.pyw`. The program opens without the black console window. If something goes wrong, the error is shown in a message box and written to `error.log` next to the program.
+
 ## Keyboard shortcuts
 
 - `Ctrl+S` — Save File
@@ -176,6 +180,8 @@ Make sure the `app/icons/` folder was downloaded: `up.png`, `down.png`, `check.p
 
 ### Other fields
 
+- Only the fields you change are written to the entry. Everything else keeps the exact values from the file, even if the editor shows them differently (for example a number outside the field range, Windows line endings or no-break spaces in the content).
+- Edited content keeps the line endings of the original text and its no-break spaces.
 - Keywords are entered separated by commas. If you do not touch the keyword field, keys that contain a comma inside are kept exactly as they were.
 - A `Selective Logic` value outside 0-3 (from an unusual file) is shown as an empty field and kept unchanged unless you pick a mode.
 - Token count is an estimate: characters / 4. It is not a model tokenizer.

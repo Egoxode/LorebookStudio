@@ -53,6 +53,40 @@ def _parse_keys(text, existing):
     return parsed
 
 
+def raw_text(edit) -> str:
+    """Text of the field exactly as typed. toPlainText() would turn no-break spaces (U+00A0)
+    into normal spaces and U+2028 into a line break; the raw text keeps them."""
+    return edit.document().toRawText().replace("\u2029", "\n")
+
+
+def _keep_line_endings(new_text: str, old_text) -> str:
+    """Edited text is written in the line-ending style of the original (Windows \\r\\n or \\n)."""
+    old = old_text if isinstance(old_text, str) else ""
+    if "\n" in old and old.count("\n") == old.count("\r\n"):
+        return new_text.replace("\r\n", "\n").replace("\n", "\r\n")
+    return new_text
+
+
+# Editor field -> entry keys it writes (top level, inside "extensions").
+# Only fields the user changed are written; the others keep the exact values from the file.
+FIELD_KEYS = {
+    "name": (("name", "comment"), ()),
+    "keys": (("key", "keys"), ()),
+    "secondary": (("keysecondary", "secondary_keys"), ()),
+    "order": (("insertion_order", "order"), ()),
+    "priority": (("priority",), ("weight",)),
+    "depth": (("depth",), ("depth",)),
+    "probability": (("probability",), ("probability",)),
+    "case_sensitive": (("case_sensitive",), ()),
+    "excludeRecursion": (("excludeRecursion",), ("excludeRecursion",)),
+    "selective": (("selective",), ()),
+    "constant": (("constant",), ()),
+    "enabled": (("enabled", "disable"), ()),
+    "selectiveLogic": (("selectiveLogic",), ("selectiveLogic",)),
+    "content": (("content",), ()),
+}
+
+
 def _entry_label(position, name, chars, keyword_count):
     return f"{position}. {name or 'Unnamed Entry'}\n{chars} chars | {max(0, chars // 4)} tokens | {keyword_count} keywords"
 
@@ -68,6 +102,10 @@ class MainWindow(QMainWindow):
         self.dirty = False
         self._loading = False
         self._reorder_pending = False
+        # Entry shown in the editor: its key, a copy of its values and what the fields showed after loading.
+        self._shown_eid = None
+        self._shown_entry = None
+        self._shown_state = None
         self.app_settings = load_settings()
 
         root = QWidget()
@@ -254,9 +292,9 @@ class MainWindow(QMainWindow):
     def update_title(self):
         lorebook = self.lorebook_name.text().strip() or "Lorebook"
         if self.dirty:
-            self.setWindowTitle(f"Lorebook Studio by Egohox - {lorebook} *")
+            self.setWindowTitle(f"Lorebook Studio by Egoxode - {lorebook} *")
         else:
-            self.setWindowTitle(f"Lorebook Studio by Egohox - {lorebook}")
+            self.setWindowTitle(f"Lorebook Studio by Egoxode - {lorebook}")
 
     def sync_ids_from_entries(self):
         """Sync self.ids from current entries dict (sorted by numeric key)."""
@@ -404,6 +442,9 @@ class MainWindow(QMainWindow):
             self.depth.setValue(_to_int(e.get("depth"), 0))
             self.enabled.setChecked(bool(e.get("enabled", True)) and not e.get("disable", False))
             self.content.setPlainText(str(e.get("content") or ""))
+            self._shown_eid = eid
+            self._shown_entry = copy.deepcopy(e)
+            self._shown_state = self._editor_state()
         finally:
             self._loading = False
 
@@ -418,7 +459,7 @@ class MainWindow(QMainWindow):
             self.preview.setPlainText(self.content.toPlainText())
 
     def update_counter(self):
-        chars = len(self.content.toPlainText())
+        chars = len(raw_text(self.content))
         self.counter_label.setText(f"Characters: {chars} | Tokens: {max(0, chars // 4)}")
 
     def update_lorebook_stats(self):
@@ -448,7 +489,7 @@ class MainWindow(QMainWindow):
             item.setText(_entry_label(
                 row + 1,
                 self.name.text(),
-                len(self.content.toPlainText()),
+                len(raw_text(self.content)),
                 len(_first_list(e, "key", "keys")),
             ))
         except Exception as ex:
@@ -457,6 +498,7 @@ class MainWindow(QMainWindow):
     def clear_editor(self):
         """Сбросить поля редактора к значениям по умолчанию (нет выбранной записи)."""
         s = self.app_settings
+        self._shown_eid = self._shown_entry = self._shown_state = None
         self._loading = True
         try:
             self.name.clear()
@@ -480,47 +522,87 @@ class MainWindow(QMainWindow):
 
     # ---------- Save current editor state to data ----------
 
-    def _write_editor_to_entry(self, e):
-        name = self.name.text()
-        kw = _parse_keys(self.keys.text(), _first_list(e, "key", "keys"))
-        sk = _parse_keys(self.secondary.text(), _first_list(e, "secondary_keys", "keysecondary"))
-        enabled = self.enabled.isChecked()
-        order = self.insertion_order.value()
+    def _editor_state(self) -> dict:
+        """Values of the editor fields, keyed like FIELD_KEYS."""
+        return {
+            "name": self.name.text(),
+            "keys": self.keys.text(),
+            "secondary": self.secondary.text(),
+            "order": self.insertion_order.value(),
+            "priority": self.priority.value(),
+            "depth": self.depth.value(),
+            "probability": self.probability.value(),
+            "case_sensitive": self.case_sensitive.isChecked(),
+            "excludeRecursion": self.exclude_recursion.isChecked(),
+            "selective": self.selective.isChecked(),
+            "constant": self.constant.isChecked(),
+            "enabled": self.enabled.isChecked(),
+            "selectiveLogic": self.selective_logic.currentIndex(),
+            "content": raw_text(self.content),
+        }
 
-        e["name"] = name
-        e["comment"] = name  # Всегда синхронизируем (редакторы берут либо name, либо comment)
-        e["key"] = list(kw)
-        e["keys"] = list(kw)
-        e["keysecondary"] = list(sk)
-        e["secondary_keys"] = list(sk)
-        e["insertion_order"] = order
-        e["order"] = order
-        e["case_sensitive"] = self.case_sensitive.isChecked()
-        e["excludeRecursion"] = self.exclude_recursion.isChecked()
-        e["priority"] = self.priority.value()
-        e["selective"] = self.selective.isChecked()
-        e["constant"] = self.constant.isChecked()
-        e["probability"] = self.probability.value()
-        e["depth"] = self.depth.value()
-        # SillyTavern читает `disable`, Chub — `enabled`: держим их согласованными,
-        # иначе выключенная запись остаётся активной в одном из редакторов.
-        e["enabled"] = enabled
-        e["disable"] = not enabled
-        e["content"] = self.content.toPlainText()
+    def _write_field(self, e, field, value, original):
+        """Write one edited field into the entry (all keys that mirror it)."""
+        ext = e.get("extensions")
+        if not isinstance(ext, dict):
+            ext = e["extensions"] = {}
+        if field == "name":
+            e["name"] = e["comment"] = value  # редакторы берут либо name, либо comment
+        elif field == "keys":
+            kw = _parse_keys(value, _first_list(original, "key", "keys"))
+            e["key"], e["keys"] = list(kw), list(kw)
+        elif field == "secondary":
+            sk = _parse_keys(value, _first_list(original, "secondary_keys", "keysecondary"))
+            e["keysecondary"], e["secondary_keys"] = list(sk), list(sk)
+        elif field == "order":
+            e["insertion_order"] = e["order"] = value
+        elif field == "enabled":
+            # SillyTavern читает `disable`, Chub — `enabled`: держим их согласованными.
+            e["enabled"], e["disable"] = value, not value
+        elif field == "selectiveLogic":
+            if value >= 0:  # -1 = незнакомый режим из чужого файла, не перезаписываем
+                e["selectiveLogic"] = ext["selectiveLogic"] = value
+        elif field == "content":
+            e["content"] = _keep_line_endings(value, original.get("content"))
+        else:
+            top, in_ext = FIELD_KEYS[field]
+            for key in top:
+                e[key] = value
+            for key in in_ext:
+                ext[key] = value
 
-        logic = self.selective_logic.currentIndex()
-        if logic >= 0:  # -1 = незнакомый режим из чужого файла, не перезаписываем
-            e["selectiveLogic"] = logic
+    @staticmethod
+    def _restore_field(e, field, original):
+        """Put the keys of an unchanged field back exactly as they were in the file."""
+        top, in_ext = FIELD_KEYS[field]
+        for key in top:
+            if key in original:
+                e[key] = copy.deepcopy(original[key])
+            else:
+                e.pop(key, None)
+        if in_ext:
+            orig_ext = original.get("extensions") if isinstance(original.get("extensions"), dict) else {}
+            ext = e.get("extensions")
+            if isinstance(ext, dict):
+                for key in in_ext:
+                    if key in orig_ext:
+                        ext[key] = copy.deepcopy(orig_ext[key])
+                    else:
+                        ext.pop(key, None)
 
-        if not isinstance(e.get("extensions"), dict):
-            e["extensions"] = {}
-        ext = e["extensions"]
-        ext["excludeRecursion"] = e["excludeRecursion"]
-        ext["depth"] = e["depth"]
-        ext["weight"] = e["priority"]
-        ext["probability"] = e["probability"]
-        ext["useProbability"] = bool(e.get("useProbability", True))
-        ext["selectiveLogic"] = _to_int(e.get("selectiveLogic"), 0)
+    def _write_editor_to_entry(self, e, eid):
+        """Write only the fields the user changed. Unchanged fields keep the exact file values:
+        the editor may show them differently (clamped numbers, line endings, no-break spaces)."""
+        current = self._editor_state()
+        if eid != self._shown_eid or self._shown_state is None:
+            # The editor does not show this entry: nothing to compare with, write nothing.
+            return
+        original, shown = self._shown_entry, self._shown_state
+        for field in FIELD_KEYS:
+            if current[field] != shown[field]:
+                self._write_field(e, field, current[field], original)
+            else:
+                self._restore_field(e, field, original)
 
     def current_save(self, *args):
         if getattr(self, "_loading", False):
@@ -535,7 +617,7 @@ class MainWindow(QMainWindow):
         e = entries[eid]
 
         before = json.dumps(e, sort_keys=True, ensure_ascii=False)
-        self._write_editor_to_entry(e)
+        self._write_editor_to_entry(e, eid)
         if json.dumps(e, sort_keys=True, ensure_ascii=False) == before:
             return  # ничего не изменилось: не помечаем файл как изменённый
 
