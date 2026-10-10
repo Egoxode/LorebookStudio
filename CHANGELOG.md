@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.3
+
+### Added
+- Drop a lorebook file anywhere on the window, including a text field, to open it. It works like Open: you are asked to save unsaved changes first; if several files are dropped, the first `.json` is opened; a broken file shows an error and the current lorebook stays open. Dropped plain text is still inserted as before.
+
+### Fixed
+- The program could crash (Segmentation fault) after the window was closed. Data was already saved; the crash happened on exit.
+- A file dropped onto the Content field inserted its path (`file:///...`) into the entry text.
+- A character card, or another JSON file without `entries`, opened as an empty lorebook. Now it is refused with a message, and the current lorebook stays open (Open and drag and drop).
+
 ## 1.0.2
 
 ### Added

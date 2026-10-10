@@ -2,7 +2,7 @@
 
 Desktop editor for SillyTavern / Chub lorebook JSON files.
 
-Version **1.0.2** ([changelog](CHANGELOG.md))
+Version **1.0.3** ([changelog](CHANGELOG.md))
 
 Lorebook Studio was made for convenient editing of lorebooks. You can freely use, copy, and modify this program.
 
@@ -17,6 +17,7 @@ This project was edited with an AI assistant. Read the code before you rely on i
 - Create, clone (the copy is placed right after the original), delete (with confirmation), and reorder entries
 - All four SillyTavern `Selective Logic` modes: AND ANY, NOT ALL, NOT ANY, AND ALL
 - Drag and drop to change entry order
+- Drop a lorebook file anywhere on the window to open it (like Open)
 - Manual `Insertion Order` (not overwritten by list position)
 - `name` and `comment` stay in sync for editor compatibility
 - Search across name, keywords, and content

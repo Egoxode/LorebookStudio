@@ -2,7 +2,8 @@ import sys
 import copy
 import json
 import markdown
-from PySide6.QtCore import QTimer, Qt
+import shiboken6
+from PySide6.QtCore import QTimer, Qt, QEvent
 from PySide6.QtGui import QShortcut, QKeySequence
 from pathlib import Path
 from PySide6.QtWidgets import (
@@ -85,6 +86,22 @@ FIELD_KEYS = {
     "selectiveLogic": (("selectiveLogic",), ("selectiveLogic",)),
     "content": (("content",), ()),
 }
+
+
+def _not_lorebook_reason(obj):
+    """Почему файл не открывается как lorebook (None — открывать)."""
+    if isinstance(obj, list):
+        return None  # старый формат: список записей в корне
+    if not isinstance(obj, dict):
+        return "This file is not a lorebook."
+    data = obj.get("data")
+    if (str(obj.get("spec", "")).startswith("chara_card")
+            or (isinstance(data, dict) and "first_mes" in data)
+            or ("first_mes" in obj and "entries" not in obj)):
+        return "This file is a character card, not a lorebook."
+    if "entries" not in obj:
+        return 'This file is not a lorebook: it has no "entries".'
+    return None
 
 
 def _entry_label(position, name, chars, keyword_count):
@@ -268,6 +285,35 @@ class MainWindow(QMainWindow):
         layout.addLayout(right, 3)
 
         self._setup_shortcuts()
+
+        # Файл, брошенный в любое место окна (и на текстовое поле), открывается как через Open,
+        # а не вставляется в текст путём.
+        self.setAcceptDrops(True)
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        kind = event.type()
+        # Только виджеты этого окна (не окно настроек и не окна сообщений).
+        if kind in (QEvent.Type.DragEnter, QEvent.Type.DragMove, QEvent.Type.Drop) \
+                and isinstance(obj, QWidget) and obj.window() is self:
+            mime = event.mimeData()
+            paths = [u.toLocalFile() for u in mime.urls() if u.isLocalFile()] if mime and mime.hasUrls() else []
+            if paths:
+                if kind == QEvent.Type.Drop:
+                    # Первый .json (если его нет — первый файл, и Open покажет ошибку).
+                    path = next((x for x in paths if x.lower().endswith(".json")), paths[0])
+                    # Открываем после завершения drop: окно с вопросом внутри обработчика
+                    # заблокировало бы Проводник, из которого тащат файл.
+                    QTimer.singleShot(0, lambda: self.open_dropped(path))
+                event.acceptProposedAction()
+                return True
+        return super().eventFilter(obj, event)
+
+    def open_dropped(self, path):
+        if self.confirm_unsaved():
+            self.open_path(path)
 
     def _setup_shortcuts(self):
         QShortcut(QKeySequence("Ctrl+S"), self, self.save_file)
@@ -754,7 +800,8 @@ class MainWindow(QMainWindow):
                     f"Settings are applied for this session, but could not be saved:\n{e}"
                 )
 
-    def open_file(self):
+    def confirm_unsaved(self):
+        """Вопрос о несохранённых правках перед открытием другого лорбука. False — отмена."""
         if self.dirty:
             r = QMessageBox.question(
                 self,
@@ -764,20 +811,29 @@ class MainWindow(QMainWindow):
                 QMessageBox.Yes
             )
             if r == QMessageBox.Cancel:
-                return
+                return False
             if r == QMessageBox.Yes:
                 self.save_file()
                 if self.dirty:
-                    return
+                    return False
+        return True
 
-        p, _ = QFileDialog.getOpenFileName(self, "Open", "", "JSON (*.json)")
-        if not p:
+    def open_file(self):
+        if not self.confirm_unsaved():
             return
+        p, _ = QFileDialog.getOpenFileName(self, "Open", "", "JSON (*.json)")
+        if p:
+            self.open_path(p)
 
+    def open_path(self, p):
         # Всё готовим во временных переменных: при ошибке текущий лорбук остаётся нетронутым.
         previous = self.data
         try:
             loaded = load_json(p)
+            reason = _not_lorebook_reason(loaded)
+            if reason:
+                QMessageBox.critical(self, "Not a lorebook", f"{reason}\n\n{Path(p).name}\n\nThe current lorebook was not changed.")
+                return
             if isinstance(loaded, dict):
                 self.data = loaded
             else:
@@ -1031,4 +1087,8 @@ def run():
     app.setStyleSheet(get_dark_theme())
     w = MainWindow()
     w.show()
-    sys.exit(app.exec())
+    code = app.exec()
+    # Сигналы держат окно через лямбды, поэтому само оно не удаляется. Удаляем его явно,
+    # пока QApplication ещё жив, иначе при выходе бывает Segmentation fault.
+    shiboken6.delete(w)
+    sys.exit(code)
