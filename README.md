@@ -2,7 +2,7 @@
 
 Desktop editor for SillyTavern / Chub lorebook JSON files.
 
-Version **1.0.3** ([changelog](CHANGELOG.md))
+Version **1.0.4** ([changelog](CHANGELOG.md))
 
 Lorebook Studio was made for convenient editing of lorebooks. You can freely use, copy, and modify this program.
 

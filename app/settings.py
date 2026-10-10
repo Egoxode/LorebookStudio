@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
 DEFAULTS = {
     "new_entry_name": "New Entry",
     "insertion_order": 100,
-    "priority": 10,
     "depth": 0,
     "probability": 100,
     "enabled": True,
@@ -29,7 +28,6 @@ DEFAULTS = {
 # не должны молча обрезаться при редактировании записи.
 RANGES = {
     "insertion_order": (0, 99999),
-    "priority": (0, 99999),
     "depth": (0, 999),
     "probability": (0, 100),
 }
@@ -127,10 +125,6 @@ class SettingsDialog(QDialog):
         self.insertion_order.setRange(*RANGES["insertion_order"])
         self.insertion_order.setValue(_as_int(self.settings.get("insertion_order", 100), 100))
 
-        self.priority = QSpinBox()
-        self.priority.setRange(*RANGES["priority"])
-        self.priority.setValue(_as_int(self.settings.get("priority", 10), 10))
-
         self.depth = QSpinBox()
         self.depth.setRange(*RANGES["depth"])
         self.depth.setValue(_as_int(self.settings.get("depth", 0), 0))
@@ -164,7 +158,6 @@ class SettingsDialog(QDialog):
             ("Insertion Order", self.insertion_order, "If multiple entries are inserted, lower Insertion Order is inserted higher."),
             ("Case Sensitive", self.case_sensitive, "Whether the keywords are case-sensitive."),
             ("Non-recursable", self.exclude_recursion, "Prevent this entry from being activated by other lorebook entries."),
-            ("Priority", self.priority, "If the token budget is reached, lower priority is discarded first."),
             ("Selective", self.selective, "Require both keywords and secondary keywords to trigger the entry."),
             ("Selective Logic", self.selective_logic, SELECTIVE_LOGIC_HINT),
             ("Constant", self.constant, "Always trigger this entry (within the token budget)."),
@@ -188,7 +181,6 @@ class SettingsDialog(QDialog):
         return {
             "new_entry_name": self.new_entry_name.text().strip() or "New Entry",
             "insertion_order": self.insertion_order.value(),
-            "priority": self.priority.value(),
             "depth": self.depth.value(),
             "probability": self.probability.value(),
             "selectiveLogic": self.selective_logic.currentIndex(),

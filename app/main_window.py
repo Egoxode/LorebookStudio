@@ -75,10 +75,10 @@ FIELD_KEYS = {
     "keys": (("key", "keys"), ()),
     "secondary": (("keysecondary", "secondary_keys"), ()),
     "order": (("insertion_order", "order"), ()),
-    "priority": (("priority",), ("weight",)),
     "depth": (("depth",), ("depth",)),
     "probability": (("probability",), ("probability",)),
-    "case_sensitive": (("case_sensitive",), ()),
+    # SillyTavern читает caseSensitive, формат V2 — case_sensitive: пишем оба.
+    "case_sensitive": (("caseSensitive", "case_sensitive"), ()),
     "excludeRecursion": (("excludeRecursion",), ("excludeRecursion",)),
     "selective": (("selective",), ()),
     "constant": (("constant",), ()),
@@ -185,10 +185,6 @@ class MainWindow(QMainWindow):
         self.insertion_order.setRange(*RANGES["insertion_order"])
         self.insertion_order.setSingleStep(1)
         self.insertion_order.setButtonSymbols(QSpinBox.ButtonSymbols.UpDownArrows)
-        self.priority = QSpinBox()
-        self.priority.setRange(*RANGES["priority"])
-        self.priority.setSingleStep(1)
-        self.priority.setButtonSymbols(QSpinBox.ButtonSymbols.UpDownArrows)
         self.depth = QSpinBox()
         self.depth.setRange(*RANGES["depth"])
         self.depth.setSingleStep(1)
@@ -223,7 +219,7 @@ class MainWindow(QMainWindow):
         self.content.textChanged.connect(self.current_save)
         for w in [self.case_sensitive, self.exclude_recursion, self.selective, self.constant, self.enabled]:
             w.toggled.connect(self.current_save)
-        for w in [self.insertion_order, self.priority, self.depth, self.probability]:
+        for w in [self.insertion_order, self.depth, self.probability]:
             w.valueChanged.connect(self.current_save)
         self.selective_logic.currentIndexChanged.connect(self.current_save)
 
@@ -234,7 +230,6 @@ class MainWindow(QMainWindow):
             ("Insertion Order", self.insertion_order, "If multiple entries are inserted, lower Insertion Order is inserted higher."),
             ("Case Sensitive", self.case_sensitive, "Whether the keywords are case-sensitive."),
             ("Non-recursable", self.exclude_recursion, "Prevent this entry from being activated by other lorebook entries."),
-            ("Priority", self.priority, "If the token budget is reached, lower priority is discarded first."),
             ("Selective", self.selective, "Require both keywords and secondary keywords to trigger the entry."),
             ("Selective Logic", self.selective_logic, SELECTIVE_LOGIC_HINT),
             ("Constant", self.constant, "Always trigger this entry (within the token budget)."),
@@ -476,9 +471,9 @@ class MainWindow(QMainWindow):
             self.secondary.setText(",".join(_first_list(e, "secondary_keys", "keysecondary")))
 
             self.insertion_order.setValue(_to_int(e.get("insertion_order", e.get("order")), 100))
-            self.case_sensitive.setChecked(bool(e.get("case_sensitive", False)))
+            cs = e.get("caseSensitive")
+            self.case_sensitive.setChecked(cs if isinstance(cs, bool) else bool(e.get("case_sensitive", False)))
             self.exclude_recursion.setChecked(bool(e.get("excludeRecursion", False)))
-            self.priority.setValue(_to_int(e.get("priority"), 10))
             self.selective.setChecked(bool(e.get("selective", False)))
             # Незнакомое значение (вне 0-3) показываем пустым и не трогаем при сохранении.
             logic = _to_int(e.get("selectiveLogic"), 0)
@@ -552,7 +547,6 @@ class MainWindow(QMainWindow):
             self.secondary.clear()
             self.content.clear()
             self.insertion_order.setValue(_to_int(s.get("insertion_order"), 100))
-            self.priority.setValue(_to_int(s.get("priority"), 10))
             self.depth.setValue(_to_int(s.get("depth"), 0))
             self.probability.setValue(_to_int(s.get("probability"), 100))
             self.case_sensitive.setChecked(bool(s.get("case_sensitive", False)))
@@ -575,7 +569,6 @@ class MainWindow(QMainWindow):
             "keys": self.keys.text(),
             "secondary": self.secondary.text(),
             "order": self.insertion_order.value(),
-            "priority": self.priority.value(),
             "depth": self.depth.value(),
             "probability": self.probability.value(),
             "case_sensitive": self.case_sensitive.isChecked(),
@@ -717,14 +710,24 @@ class MainWindow(QMainWindow):
         e["key"], e["keys"] = list(kw), list(kw)
         e["keysecondary"], e["secondary_keys"] = list(sk), list(sk)
 
-        for field, default in (("selective", False), ("case_sensitive", False),
+        # caseSensitive (SillyTavern) главнее; null/нет — «как в общих настройках ST», не трогаем,
+        # но включённую галочку переносим, чтобы ST её видел.
+        cs = e.get("caseSensitive")
+        if isinstance(cs, bool):
+            e["case_sensitive"] = cs
+        else:
+            e["case_sensitive"] = bool(e.get("case_sensitive", s.get("case_sensitive", False)))
+            if e["case_sensitive"]:
+                e["caseSensitive"] = True
+
+        for field, default in (("selective", False),
                                ("constant", False), ("excludeRecursion", False),
                                ("useProbability", True), ("addMemo", True)):
             e[field] = bool(e.get(field, s.get(field, default)))
 
         order = _to_int(e.get("insertion_order", e.get("order")), _to_int(s.get("insertion_order"), 100))
         e["order"] = e["insertion_order"] = order
-        for field, setting, default in (("priority", "priority", 10), ("probability", "probability", 100),
+        for field, setting, default in (("probability", "probability", 100),
                                         ("depth", "depth", 0), ("selectiveLogic", "selectiveLogic", 0)):
             e[field] = _to_int(e.get(field), _to_int(s.get(setting), default))
 
@@ -739,7 +742,6 @@ class MainWindow(QMainWindow):
             e["extensions"] = {}
         ext = e["extensions"]
         ext.setdefault("depth", e["depth"])
-        ext.setdefault("weight", e["priority"])
         ext.setdefault("probability", e["probability"])
         ext.setdefault("useProbability", e["useProbability"])
         ext.setdefault("selectiveLogic", e["selectiveLogic"])
@@ -898,6 +900,8 @@ class MainWindow(QMainWindow):
     # ---------- Entry CRUD ----------
 
     def add_entry(self):
+        if self.search.text():
+            self.search.clear()  # иначе новая запись сразу скрыта поиском
         entries = self.data.setdefault("entries", {})
         if not isinstance(entries, dict):
             entries = {}

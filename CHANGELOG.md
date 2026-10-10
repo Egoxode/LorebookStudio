@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.4
+
+### Changed
+- Priority removed from the editor and Settings: SillyTavern does not use it. A `priority` value already in a file is kept unchanged.
+- Add clears the search, so the new entry is visible in the list.
+
+### Fixed
+- Case Sensitive had no effect in SillyTavern: it was saved only as `case_sensitive`, while SillyTavern reads `caseSensitive`. Now both are written. An entry left at SillyTavern's default (`caseSensitive: null`, use the global setting) stays so until you change the checkbox.
+- A file with `NaN` or `Infinity` (not valid JSON; SillyTavern cannot read it) opened and was saved back unchanged. Now it is refused with a message.
+
 ## 1.0.3
 
 ### Added

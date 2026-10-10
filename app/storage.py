@@ -3,10 +3,15 @@ import os
 import tempfile
 
 
+def _reject_constant(name):
+    # Python читает NaN/Infinity, но это не JSON: SillyTavern такой файл не откроет.
+    raise ValueError(f"{name} is not a valid JSON value")
+
+
 def load_json(path):
     # utf-8-sig: корректно читает и обычные файлы, и файлы с BOM (Блокнот Windows и др.)
     with open(path, "r", encoding="utf-8-sig") as f:
-        return json.load(f)
+        return json.load(f, parse_constant=_reject_constant)
 
 
 def _default_file_mode() -> int:
