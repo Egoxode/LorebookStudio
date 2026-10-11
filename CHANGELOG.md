@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.6
+
+### Changed
+- Case Sensitive has three states, like in SillyTavern: checked (case-sensitive), empty (not case-sensitive), filled square (use the SillyTavern setting). Before, an empty box could only mean "use the SillyTavern setting", so an entry could not be made case-insensitive when Case-sensitive is on in SillyTavern. New entries use the SillyTavern setting by default (changeable in Settings).
+- Depth removed from the editor and Settings. In SillyTavern it is the insertion depth of entries placed @D (at depth), not the number of messages searched for keywords, as the hint said. A `depth` value already in the file is kept unchanged; new entries no longer get `depth: 0`.
+- Markdown Preview uses CommonMark (`markdown-it-py` instead of `markdown`): a list right after a line of text is shown as a list, a bulleted and a numbered list next to each other are no longer merged, a single line break is shown as a line break. Run `pip install -r requirements.txt` after updating.
+
+## 1.0.5
+
+### Fixed
+- Entries created in Lorebook Studio (the + button, a new lorebook) were found by SillyTavern, but their text never reached the prompt: the entry had no `position`. An entry without `position` now gets 0 (before the character, SillyTavern's default for a new entry); an existing value is never changed. To repair an older lorebook, open it and save it.
+- Character counts with Windows line endings (`\r\n`) disagreed: the list and the lorebook statistics counted a line break as 2 characters, the entry counter as 1, and the number in the list changed after an edit. All counters now count a line break as one character, as the Content field shows it.
+
 ## 1.0.4
 
 ### Changed

@@ -1,7 +1,7 @@
 import sys
 import copy
 import json
-import markdown
+from markdown_it import MarkdownIt
 import shiboken6
 from PySide6.QtCore import QTimer, Qt, QEvent
 from PySide6.QtGui import QShortcut, QKeySequence
@@ -15,8 +15,13 @@ from PySide6.QtWidgets import (
 from .theme import get_dark_theme
 from .storage import load_json, save_json
 from .settings import (
-    load_settings, save_settings, SettingsDialog, RANGES, SELECTIVE_LOGIC, SELECTIVE_LOGIC_HINT
+    load_settings, save_settings, SettingsDialog, RANGES, SELECTIVE_LOGIC, SELECTIVE_LOGIC_HINT,
+    CASE_SENSITIVE_HINT, case_state, state_case
 )
+
+# CommonMark (как в большинстве редакторов и в SillyTavern): список сразу после строки текста распознаётся,
+# маркированный и нумерованный списки не сливаются; одиночный перевод строки — перенос строки.
+_MD = MarkdownIt("commonmark", {"breaks": True}).enable(["table", "strikethrough"])
 
 
 def _to_int(value, default):
@@ -75,7 +80,6 @@ FIELD_KEYS = {
     "keys": (("key", "keys"), ()),
     "secondary": (("keysecondary", "secondary_keys"), ()),
     "order": (("insertion_order", "order"), ()),
-    "depth": (("depth",), ("depth",)),
     "probability": (("probability",), ("probability",)),
     # SillyTavern читает caseSensitive, формат V2 — case_sensitive: пишем оба.
     "case_sensitive": (("caseSensitive", "case_sensitive"), ()),
@@ -102,6 +106,13 @@ def _not_lorebook_reason(obj):
     if "entries" not in obj:
         return 'This file is not a lorebook: it has no "entries".'
     return None
+
+
+def char_count(text) -> int:
+    """Characters as the Content field shows them: a line break (\\r\\n or \\r) is one character.
+    Used by every counter, so the entry, the list and the lorebook totals always agree."""
+    text = text if isinstance(text, str) else str(text or "")
+    return len(text.replace("\r\n", "\n").replace("\r", "\n"))
 
 
 def _entry_label(position, name, chars, keyword_count):
@@ -185,16 +196,13 @@ class MainWindow(QMainWindow):
         self.insertion_order.setRange(*RANGES["insertion_order"])
         self.insertion_order.setSingleStep(1)
         self.insertion_order.setButtonSymbols(QSpinBox.ButtonSymbols.UpDownArrows)
-        self.depth = QSpinBox()
-        self.depth.setRange(*RANGES["depth"])
-        self.depth.setSingleStep(1)
-        self.depth.setButtonSymbols(QSpinBox.ButtonSymbols.UpDownArrows)
         self.probability = QSpinBox()
         self.probability.setRange(*RANGES["probability"])
         self.probability.setSingleStep(1)
         self.probability.setButtonSymbols(QSpinBox.ButtonSymbols.UpDownArrows)
 
         self.case_sensitive = QCheckBox()
+        self.case_sensitive.setTristate(True)
         self.exclude_recursion = QCheckBox("")
         self.selective = QCheckBox()
         self.constant = QCheckBox()
@@ -217,9 +225,10 @@ class MainWindow(QMainWindow):
         for w in [self.name, self.keys, self.secondary]:
             w.textChanged.connect(self.current_save)
         self.content.textChanged.connect(self.current_save)
-        for w in [self.case_sensitive, self.exclude_recursion, self.selective, self.constant, self.enabled]:
+        self.case_sensitive.checkStateChanged.connect(self.current_save)
+        for w in [self.exclude_recursion, self.selective, self.constant, self.enabled]:
             w.toggled.connect(self.current_save)
-        for w in [self.insertion_order, self.depth, self.probability]:
+        for w in [self.insertion_order, self.probability]:
             w.valueChanged.connect(self.current_save)
         self.selective_logic.currentIndexChanged.connect(self.current_save)
 
@@ -228,13 +237,12 @@ class MainWindow(QMainWindow):
             ("Keywords", self.keys, "The keys that activate the content."),
             ("Secondary Keywords", self.secondary, "Additional keys required to activate the content. Ignored if Selective is off."),
             ("Insertion Order", self.insertion_order, "If multiple entries are inserted, lower Insertion Order is inserted higher."),
-            ("Case Sensitive", self.case_sensitive, "Whether the keywords are case-sensitive."),
+            ("Case Sensitive", self.case_sensitive, CASE_SENSITIVE_HINT),
             ("Non-recursable", self.exclude_recursion, "Prevent this entry from being activated by other lorebook entries."),
             ("Selective", self.selective, "Require both keywords and secondary keywords to trigger the entry."),
             ("Selective Logic", self.selective_logic, SELECTIVE_LOGIC_HINT),
             ("Constant", self.constant, "Always trigger this entry (within the token budget)."),
             ("Probability", self.probability, "Percent chance the content is activated when the entry is triggered."),
-            ("Depth", self.depth, "How many recent messages to scan for keywords."),
             ("Enabled", self.enabled, "Turns this entry on. If unchecked, the entry will not activate."),
             ("Content", self.content, "The content that gets activated and sent to the AI."),
             ("Statistics", self.counter_label, "Character and token count for this entry."),
@@ -405,7 +413,7 @@ class MainWindow(QMainWindow):
         for idx, eid in enumerate(display_order, start=1):
             e = entries.get(eid, {})
             name = e.get("name") or e.get("comment") or ""
-            chars = len(str(e.get("content", "")))
+            chars = char_count(e.get("content", ""))
             kw_count = len(_first_list(e, "key", "keys"))
             item = QListWidgetItem(_entry_label(idx, name, chars, kw_count))
             item.setData(Qt.UserRole, eid)
@@ -472,7 +480,7 @@ class MainWindow(QMainWindow):
 
             self.insertion_order.setValue(_to_int(e.get("insertion_order", e.get("order")), 100))
             cs = e.get("caseSensitive")
-            self.case_sensitive.setChecked(cs if isinstance(cs, bool) else bool(e.get("case_sensitive", False)))
+            self.case_sensitive.setCheckState(case_state(cs if isinstance(cs, bool) else None))
             self.exclude_recursion.setChecked(bool(e.get("excludeRecursion", False)))
             self.selective.setChecked(bool(e.get("selective", False)))
             # Незнакомое значение (вне 0-3) показываем пустым и не трогаем при сохранении.
@@ -480,7 +488,6 @@ class MainWindow(QMainWindow):
             self.selective_logic.setCurrentIndex(logic if 0 <= logic < self.selective_logic.count() else -1)
             self.constant.setChecked(bool(e.get("constant", False)))
             self.probability.setValue(_to_int(e.get("probability"), 100))
-            self.depth.setValue(_to_int(e.get("depth"), 0))
             self.enabled.setChecked(bool(e.get("enabled", True)) and not e.get("disable", False))
             self.content.setPlainText(str(e.get("content") or ""))
             self._shown_eid = eid
@@ -495,12 +502,13 @@ class MainWindow(QMainWindow):
 
     def update_preview(self):
         try:
-            self.preview.setHtml(markdown.markdown(self.content.toPlainText()))
+            # .strip(): перевод строки после последнего тега Qt показывает лишним пробелом в конце
+            self.preview.setHtml(_MD.render(self.content.toPlainText()).strip())
         except Exception:
             self.preview.setPlainText(self.content.toPlainText())
 
     def update_counter(self):
-        chars = len(raw_text(self.content))
+        chars = char_count(raw_text(self.content))
         self.counter_label.setText(f"Characters: {chars} | Tokens: {max(0, chars // 4)}")
 
     def update_lorebook_stats(self):
@@ -511,7 +519,7 @@ class MainWindow(QMainWindow):
             total_chars = 0
             for e in entries.values():
                 if isinstance(e, dict):
-                    total_chars += len(str(e.get("content", "")))
+                    total_chars += char_count(e.get("content", ""))
             total_tokens = max(0, total_chars // 4)
             self.lorebook_stats_label.setText(
                 f"Entries: {len(entries)} | Characters: {total_chars} | Tokens: {total_tokens}"
@@ -530,7 +538,7 @@ class MainWindow(QMainWindow):
             item.setText(_entry_label(
                 row + 1,
                 self.name.text(),
-                len(raw_text(self.content)),
+                char_count(raw_text(self.content)),
                 len(_first_list(e, "key", "keys")),
             ))
         except Exception as ex:
@@ -547,9 +555,8 @@ class MainWindow(QMainWindow):
             self.secondary.clear()
             self.content.clear()
             self.insertion_order.setValue(_to_int(s.get("insertion_order"), 100))
-            self.depth.setValue(_to_int(s.get("depth"), 0))
             self.probability.setValue(_to_int(s.get("probability"), 100))
-            self.case_sensitive.setChecked(bool(s.get("case_sensitive", False)))
+            self.case_sensitive.setCheckState(case_state(s.get("caseSensitive")))
             self.exclude_recursion.setChecked(bool(s.get("excludeRecursion", False)))
             self.selective.setChecked(bool(s.get("selective", False)))
             self.selective_logic.setCurrentIndex(_to_int(s.get("selectiveLogic"), 0))
@@ -569,9 +576,8 @@ class MainWindow(QMainWindow):
             "keys": self.keys.text(),
             "secondary": self.secondary.text(),
             "order": self.insertion_order.value(),
-            "depth": self.depth.value(),
             "probability": self.probability.value(),
-            "case_sensitive": self.case_sensitive.isChecked(),
+            "case_sensitive": state_case(self.case_sensitive.checkState()),
             "excludeRecursion": self.exclude_recursion.isChecked(),
             "selective": self.selective.isChecked(),
             "constant": self.constant.isChecked(),
@@ -601,6 +607,10 @@ class MainWindow(QMainWindow):
         elif field == "selectiveLogic":
             if value >= 0:  # -1 = незнакомый режим из чужого файла, не перезаписываем
                 e["selectiveLogic"] = ext["selectiveLogic"] = value
+        elif field == "case_sensitive":
+            # caseSensitive читает SillyTavern: true / false / null (= общая настройка ST).
+            e["caseSensitive"] = value
+            e["case_sensitive"] = value is True
         elif field == "content":
             e["content"] = _keep_line_endings(value, original.get("content"))
         else:
@@ -704,6 +714,10 @@ class MainWindow(QMainWindow):
         name = e.get("name") or e.get("comment") or f"Entry {key}"
         e["name"] = e["comment"] = str(name)
         e["content"] = str(e.get("content") or "")
+        # Без position SillyTavern запись включает, но её текст никуда не вставляет.
+        # 0 — «перед персонажем», как у новой записи в самом ST. Существующее значение не трогаем.
+        if e.get("position") is None:
+            e["position"] = 0
 
         kw = _first_list(e, "key", "keys")
         sk = _first_list(e, "secondary_keys", "keysecondary")
@@ -715,10 +729,15 @@ class MainWindow(QMainWindow):
         cs = e.get("caseSensitive")
         if isinstance(cs, bool):
             e["case_sensitive"] = cs
+        elif e.get("case_sensitive") is True:
+            e["caseSensitive"] = e["case_sensitive"] = True  # формат V2: переносим, чтобы ST видел
+        elif "caseSensitive" not in e and "case_sensitive" not in e:
+            default = s.get("caseSensitive")  # true / false / null из Settings
+            if isinstance(default, bool):
+                e["caseSensitive"] = default
+            e["case_sensitive"] = default is True
         else:
-            e["case_sensitive"] = bool(e.get("case_sensitive", s.get("case_sensitive", False)))
-            if e["case_sensitive"]:
-                e["caseSensitive"] = True
+            e["case_sensitive"] = False  # caseSensitive null — как в общих настройках ST
 
         for field, default in (("selective", False),
                                ("constant", False), ("excludeRecursion", False),
@@ -728,7 +747,7 @@ class MainWindow(QMainWindow):
         order = _to_int(e.get("insertion_order", e.get("order")), _to_int(s.get("insertion_order"), 100))
         e["order"] = e["insertion_order"] = order
         for field, setting, default in (("probability", "probability", 100),
-                                        ("depth", "depth", 0), ("selectiveLogic", "selectiveLogic", 0)):
+                                        ("selectiveLogic", "selectiveLogic", 0)):
             e[field] = _to_int(e.get(field), _to_int(s.get(setting), default))
 
         # SillyTavern использует `disable`, Chub — `enabled`: запись выключена, если выключено любое из них.
@@ -741,7 +760,6 @@ class MainWindow(QMainWindow):
         if not isinstance(e.get("extensions"), dict):
             e["extensions"] = {}
         ext = e["extensions"]
-        ext.setdefault("depth", e["depth"])
         ext.setdefault("probability", e["probability"])
         ext.setdefault("useProbability", e["useProbability"])
         ext.setdefault("selectiveLogic", e["selectiveLogic"])

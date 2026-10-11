@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QDialogButtonBox,
     QLineEdit, QSpinBox, QCheckBox, QComboBox, QLabel, QWidget,
@@ -10,11 +11,10 @@ from PySide6.QtWidgets import (
 DEFAULTS = {
     "new_entry_name": "New Entry",
     "insertion_order": 100,
-    "depth": 0,
     "probability": 100,
     "enabled": True,
     "disable": False,
-    "case_sensitive": False,
+    "caseSensitive": None,  # true / false / null (= общая настройка SillyTavern)
     "selective": False,
     "constant": False,
     "excludeRecursion": False,
@@ -28,7 +28,6 @@ DEFAULTS = {
 # не должны молча обрезаться при редактировании записи.
 RANGES = {
     "insertion_order": (0, 99999),
-    "depth": (0, 999),
     "probability": (0, 100),
 }
 
@@ -39,6 +38,29 @@ SELECTIVE_LOGIC_HINT = (
     "Which secondary keywords must match. AND ANY: at least one matches. NOT ALL: not all of them match. "
     "NOT ANY: none of them match. AND ALL: all of them match. Ignored if Selective is off."
 )
+
+CASE_SENSITIVE_HINT = (
+    "Whether the keywords are case-sensitive. Checked: yes. Empty: no. "
+    "Filled square: use the SillyTavern setting (Case-sensitive in World Info settings)."
+)
+
+
+def case_state(value):
+    """caseSensitive (true / false / null) -> checkbox state."""
+    if value is True:
+        return Qt.CheckState.Checked
+    if value is False:
+        return Qt.CheckState.Unchecked
+    return Qt.CheckState.PartiallyChecked
+
+
+def state_case(state):
+    """Checkbox state -> caseSensitive (true / false / null)."""
+    if state == Qt.CheckState.Checked:
+        return True
+    if state == Qt.CheckState.Unchecked:
+        return False
+    return None
 
 
 def _as_int(value, default: int) -> int:
@@ -62,6 +84,10 @@ def load_settings() -> dict:
                 for key, default in DEFAULTS.items():
                     if key in loaded and type(loaded[key]) is type(default):
                         data[key] = loaded[key]
+                if "caseSensitive" in loaded and any(loaded["caseSensitive"] is v for v in (True, False, None)):
+                    data["caseSensitive"] = loaded["caseSensitive"]
+                elif loaded.get("case_sensitive") is True:
+                    data["caseSensitive"] = True  # settings.json до 1.0.6: true — включено, false — как в ST
         except Exception:
             pass
     return data
@@ -125,10 +151,6 @@ class SettingsDialog(QDialog):
         self.insertion_order.setRange(*RANGES["insertion_order"])
         self.insertion_order.setValue(_as_int(self.settings.get("insertion_order", 100), 100))
 
-        self.depth = QSpinBox()
-        self.depth.setRange(*RANGES["depth"])
-        self.depth.setValue(_as_int(self.settings.get("depth", 0), 0))
-
         self.probability = QSpinBox()
         self.probability.setRange(*RANGES["probability"])
         self.probability.setValue(_as_int(self.settings.get("probability", 100), 100))
@@ -143,7 +165,8 @@ class SettingsDialog(QDialog):
         self.disable = QCheckBox()
         self.disable.setChecked(bool(self.settings.get("disable", False)))
         self.case_sensitive = QCheckBox()
-        self.case_sensitive.setChecked(bool(self.settings.get("case_sensitive", False)))
+        self.case_sensitive.setTristate(True)
+        self.case_sensitive.setCheckState(case_state(self.settings.get("caseSensitive")))
         self.selective = QCheckBox()
         self.selective.setChecked(bool(self.settings.get("selective", False)))
         self.constant = QCheckBox()
@@ -156,13 +179,12 @@ class SettingsDialog(QDialog):
         for label, widget, text in [
             ("Name", self.new_entry_name, "Display name of this entry. Also saved as comment for other editors."),
             ("Insertion Order", self.insertion_order, "If multiple entries are inserted, lower Insertion Order is inserted higher."),
-            ("Case Sensitive", self.case_sensitive, "Whether the keywords are case-sensitive."),
+            ("Case Sensitive", self.case_sensitive, CASE_SENSITIVE_HINT),
             ("Non-recursable", self.exclude_recursion, "Prevent this entry from being activated by other lorebook entries."),
             ("Selective", self.selective, "Require both keywords and secondary keywords to trigger the entry."),
             ("Selective Logic", self.selective_logic, SELECTIVE_LOGIC_HINT),
             ("Constant", self.constant, "Always trigger this entry (within the token budget)."),
             ("Probability", self.probability, "Percent chance the content is activated when the entry is triggered."),
-            ("Depth", self.depth, "How many recent messages to scan for keywords."),
             ("Enabled", self.enabled, "Turns this entry on. If unchecked, the entry will not activate."),
             ("Disable", self.disable, "Compatibility flag for some editors. Keep off unless you need it."),
             ("Use Probability", self.use_probability, "If on, the Probability value is used. If off, Probability is ignored."),
@@ -181,12 +203,11 @@ class SettingsDialog(QDialog):
         return {
             "new_entry_name": self.new_entry_name.text().strip() or "New Entry",
             "insertion_order": self.insertion_order.value(),
-            "depth": self.depth.value(),
             "probability": self.probability.value(),
             "selectiveLogic": self.selective_logic.currentIndex(),
             "enabled": self.enabled.isChecked(),
             "disable": self.disable.isChecked(),
-            "case_sensitive": self.case_sensitive.isChecked(),
+            "caseSensitive": state_case(self.case_sensitive.checkState()),
             "selective": self.selective.isChecked(),
             "constant": self.constant.isChecked(),
             "excludeRecursion": self.exclude_recursion.isChecked(),

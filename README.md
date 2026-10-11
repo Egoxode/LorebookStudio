@@ -2,7 +2,7 @@
 
 Desktop editor for SillyTavern / Chub lorebook JSON files.
 
-Version **1.0.4** ([changelog](CHANGELOG.md))
+Version **1.0.6** ([changelog](CHANGELOG.md))
 
 Lorebook Studio was made for convenient editing of lorebooks. You can freely use, copy, and modify this program.
 
@@ -91,7 +91,7 @@ pip install -r requirements.txt
 This installs:
 
 - `PySide6` — interface
-- `markdown` — preview
+- `markdown-it-py` — preview
 
 ### 5. Run
 
@@ -177,7 +177,7 @@ Make sure the `app/icons/` folder was downloaded: `up.png`, `down.png`, `check.p
 ### Search and preview
 
 - Search looks through name, keywords, secondary keywords, and content.
-- Markdown Preview follows normal Markdown rules: a single line break does not start a new paragraph. Use a blank line for a new paragraph.
+- Markdown Preview follows CommonMark, like most Markdown editors: a list may start right after a line of text, and a single line break is shown as a line break. Use a blank line for a new paragraph.
 
 ### Other fields
 
@@ -185,7 +185,10 @@ Make sure the `app/icons/` folder was downloaded: `up.png`, `down.png`, `check.p
 - Edited content keeps the line endings of the original text and its no-break spaces.
 - Keywords are entered separated by commas. If you do not touch the keyword field, keys that contain a comma inside are kept exactly as they were.
 - A `Selective Logic` value outside 0-3 (from an unusual file) is shown as an empty field and kept unchanged unless you pick a mode.
-- Token count is an estimate: characters / 4. It is not a model tokenizer.
+- Token count is an estimate: characters / 4. It is not a model tokenizer. A line break counts as one character.
+- `Case Sensitive` has three states. Checked: keywords are case-sensitive. Empty: they are not. Filled square: use the SillyTavern setting (Case-sensitive in World Info settings); this is the default for new entries. The program writes `caseSensitive` (`true` / `false` / `null`), which SillyTavern reads, and `case_sensitive`.
+- `Depth` is not in the editor: in SillyTavern it is the insertion depth of entries placed @D (at depth), which this program does not set. A `depth` value already in the file is kept unchanged.
+- An entry without `position` gets `0` (before the character), as a new entry in SillyTavern.
 - `Enabled` turns the entry on.
 - `Disable` is the SillyTavern counterpart of `Enabled`. The editor keeps them in sync (`disable = not enabled`), so a disabled entry is really off in both SillyTavern and Chub.
 - `addMemo` is always written as `true`. It does not control activation.
