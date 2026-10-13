@@ -1,3 +1,4 @@
+import re
 import sys
 import copy
 import json
@@ -16,7 +17,8 @@ from .theme import get_dark_theme
 from .storage import load_json, save_json
 from .settings import (
     load_settings, save_settings, SettingsDialog, RANGES, SELECTIVE_LOGIC, SELECTIVE_LOGIC_HINT,
-    CASE_SENSITIVE_HINT, case_state, state_case
+    CASE_SENSITIVE_HINT, case_state, state_case,
+    POSITIONS, AT_DEPTH, DEFAULT_DEPTH, DEPTH_RANGE, ROLES, POSITION_HINT
 )
 
 # CommonMark (как в большинстве редакторов и в SillyTavern): список сразу после строки текста распознаётся,
@@ -32,10 +34,41 @@ def _to_int(value, default):
         return default
 
 
+# Ключ-регулярка, как её понимает SillyTavern: /шаблон/флаги, косая черта внутри — только \\/.
+_REGEX_KEY = re.compile(r"/(?:\\.|[^\\/])+/[gimsuy]*")
+
+
+def split_keys(text):
+    """Строка ключей через запятую -> список. Запятая внутри ключа-регулярки (/a{1,3}/i)
+    ключ не делит: SillyTavern разбирает так же. Остальное делится по каждой запятой."""
+    text = text if isinstance(text, str) else ""
+    keys, i, n = [], 0, len(text)
+    while i < n:
+        j = i
+        while j < n and text[j].isspace():
+            j += 1
+        m = _REGEX_KEY.match(text, j) if j < n and text[j] == "/" else None
+        if m:
+            k = m.end()
+            while k < n and text[k].isspace():
+                k += 1
+            if k >= n or text[k] == ",":
+                keys.append(text[j:m.end()])
+                i = k + 1
+                continue
+        k = text.find(",", i)
+        k = n if k < 0 else k
+        token = text[i:k].strip()
+        if token:
+            keys.append(token)
+        i = k + 1
+    return keys
+
+
 def _to_list(value):
     """Ключевые слова как список строк (допускает список, строку через запятую или мусор)."""
     if isinstance(value, str):
-        return [x.strip() for x in value.split(",") if x.strip()]
+        return split_keys(value)
     if isinstance(value, (list, tuple)):
         return [str(x) for x in value if x is not None and str(x) != ""]
     return []
@@ -53,8 +86,8 @@ def _first_list(entry, *names):
 def _parse_keys(text, existing):
     """Разобрать строку из поля ввода. Если пользователь не менял список, оставить исходные
     значения как есть (ключи с запятой внутри не должны молча разваливаться на части)."""
-    parsed = [x.strip() for x in text.split(",") if x.strip()]
-    if [x.strip() for x in ",".join(existing).split(",") if x.strip()] == parsed:
+    parsed = split_keys(text)
+    if split_keys(",".join(existing)) == parsed:
         return list(existing)
     return parsed
 
@@ -85,6 +118,8 @@ FIELD_KEYS = {
     "case_sensitive": (("caseSensitive", "case_sensitive"), ()),
     "excludeRecursion": (("excludeRecursion",), ("excludeRecursion",)),
     "selective": (("selective",), ()),
+    # Место вставки: position, а для @ Depth ещё depth и role (одна группа полей).
+    "position": (("position", "depth", "role"), ()),
     "constant": (("constant",), ()),
     "enabled": (("enabled", "disable"), ()),
     "selectiveLogic": (("selectiveLogic",), ("selectiveLogic",)),
@@ -106,6 +141,15 @@ def _not_lorebook_reason(obj):
     if "entries" not in obj:
         return 'This file is not a lorebook: it has no "entries".'
     return None
+
+
+HISTORY_LIMIT = 100
+
+
+def _default_position(settings) -> int:
+    """Место вставки для новых записей и записей без position (Settings, по умолчанию 0)."""
+    pos = _to_int(settings.get("position"), 0)
+    return pos if 0 <= pos < len(POSITIONS) else 0
 
 
 def char_count(text) -> int:
@@ -134,6 +178,10 @@ class MainWindow(QMainWindow):
         self._shown_eid = None
         self._shown_entry = None
         self._shown_state = None
+        # Undo/Redo действий со списком: снимки (записи по порядку — те же объекты, выбранная запись).
+        # Объекты записей общие со снимком, поэтому правки текста после действия Undo не откатывает.
+        self.history = []
+        self.future = []
         self.app_settings = load_settings()
 
         root = QWidget()
@@ -164,6 +212,10 @@ class MainWindow(QMainWindow):
         self.btn_down = QPushButton("▼")
         self.btn_clone = QPushButton("Clone")
         self.btn_delete = QPushButton("Delete")
+        self.btn_undo = QPushButton("Undo")
+        self.btn_redo = QPushButton("Redo")
+        self.btn_undo.setToolTip(f"Undo: add, clone, delete, move (Ctrl+Z in the list, up to {HISTORY_LIMIT} steps)")
+        self.btn_redo.setToolTip("Redo (Ctrl+Y in the list)")
 
         self.btn_new.clicked.connect(self.new_lorebook)
         self.btn_open.clicked.connect(self.open_file)
@@ -175,6 +227,8 @@ class MainWindow(QMainWindow):
         self.btn_down.clicked.connect(self.move_down)
         self.btn_clone.clicked.connect(self.clone_entry)
         self.btn_delete.clicked.connect(self.delete_entry)
+        self.btn_undo.clicked.connect(self.undo)
+        self.btn_redo.clicked.connect(self.redo)
 
         left.addWidget(self.btn_new)
         left.addWidget(self.btn_open)
@@ -211,6 +265,23 @@ class MainWindow(QMainWindow):
         self.selective_logic = QComboBox()
         self.selective_logic.addItems(SELECTIVE_LOGIC)
 
+        self.position = QComboBox()
+        self.position.addItems(POSITIONS)
+        self.depth = QSpinBox()
+        self.depth.setRange(*DEPTH_RANGE)
+        self.depth.setButtonSymbols(QSpinBox.ButtonSymbols.UpDownArrows)
+        self.role = QComboBox()
+        self.role.addItems(ROLES)
+        self.depth_label = QLabel("Depth")
+        self.role_label = QLabel("Role")
+        position_box = QWidget()
+        position_row = QHBoxLayout(position_box)
+        position_row.setContentsMargins(0, 0, 0, 0)
+        position_row.addWidget(self.position, 1)
+        for w in (self.depth_label, self.depth, self.role_label, self.role):
+            position_row.addWidget(w)
+        self.position.currentIndexChanged.connect(self.update_depth_fields)
+
         self.content = QTextEdit()
         self.content.setAcceptRichText(False)
         self.counter_label = QLabel("Characters: 0 | Tokens: 0")
@@ -231,12 +302,16 @@ class MainWindow(QMainWindow):
         for w in [self.insertion_order, self.probability]:
             w.valueChanged.connect(self.current_save)
         self.selective_logic.currentIndexChanged.connect(self.current_save)
+        self.position.currentIndexChanged.connect(self.current_save)
+        self.depth.valueChanged.connect(self.current_save)
+        self.role.currentIndexChanged.connect(self.current_save)
 
         field_hints = [
             ("Name", self.name, "Display name of this entry. Also saved as comment for other editors."),
             ("Keywords", self.keys, "The keys that activate the content."),
             ("Secondary Keywords", self.secondary, "Additional keys required to activate the content. Ignored if Selective is off."),
             ("Insertion Order", self.insertion_order, "If multiple entries are inserted, lower Insertion Order is inserted higher."),
+            ("Position", position_box, POSITION_HINT),
             ("Case Sensitive", self.case_sensitive, CASE_SENSITIVE_HINT),
             ("Non-recursable", self.exclude_recursion, "Prevent this entry from being activated by other lorebook entries."),
             ("Selective", self.selective, "Require both keywords and secondary keywords to trigger the entry."),
@@ -277,6 +352,9 @@ class MainWindow(QMainWindow):
         actions.addWidget(self.btn_down)
         actions.addWidget(self.btn_clone)
         actions.addWidget(self.btn_delete)
+        actions.addSpacing(12)
+        actions.addWidget(self.btn_undo)
+        actions.addWidget(self.btn_redo)
         actions.addStretch()
         actions_widget = QWidget()
         actions_widget.setFixedWidth(90)
@@ -288,6 +366,8 @@ class MainWindow(QMainWindow):
         layout.addLayout(right, 3)
 
         self._setup_shortcuts()
+        self.update_depth_fields()
+        self.update_undo_buttons()
 
         # Файл, брошенный в любое место окна (и на текстовое поле), открывается как через Open,
         # а не вставляется в текст путём.
@@ -324,6 +404,10 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+N"), self, self.new_lorebook)
         QShortcut(QKeySequence("Ctrl+F"), self, self.focus_search)
         QShortcut(QKeySequence("Ctrl+D"), self, self.clone_entry)
+        # Только когда фокус в списке: в текстовых полях Ctrl+Z отменяет правку текста.
+        for key, slot in (("Ctrl+Z", self.undo), ("Ctrl+Y", self.redo), ("Ctrl+Shift+Z", self.redo)):
+            sc = QShortcut(QKeySequence(key), self.list, slot)
+            sc.setContext(Qt.ShortcutContext.WidgetShortcut)
 
     def focus_search(self):
         self.search.setFocus()
@@ -486,6 +570,13 @@ class MainWindow(QMainWindow):
             # Незнакомое значение (вне 0-3) показываем пустым и не трогаем при сохранении.
             logic = _to_int(e.get("selectiveLogic"), 0)
             self.selective_logic.setCurrentIndex(logic if 0 <= logic < self.selective_logic.count() else -1)
+            # Незнакомое место вставки (Outlet, мусор) показываем пустым и не трогаем при сохранении.
+            pos = _to_int(e.get("position"), -1)
+            self.position.setCurrentIndex(pos if 0 <= pos < len(POSITIONS) else -1)
+            self.depth.setValue(_to_int(e.get("depth"), DEFAULT_DEPTH))
+            role = e.get("role")
+            role = 0 if role is None else _to_int(role, -1)  # нет роли — System, как в SillyTavern
+            self.role.setCurrentIndex(role if 0 <= role < len(ROLES) else -1)
             self.constant.setChecked(bool(e.get("constant", False)))
             self.probability.setValue(_to_int(e.get("probability"), 100))
             self.enabled.setChecked(bool(e.get("enabled", True)) and not e.get("disable", False))
@@ -560,6 +651,9 @@ class MainWindow(QMainWindow):
             self.exclude_recursion.setChecked(bool(s.get("excludeRecursion", False)))
             self.selective.setChecked(bool(s.get("selective", False)))
             self.selective_logic.setCurrentIndex(_to_int(s.get("selectiveLogic"), 0))
+            self.position.setCurrentIndex(_default_position(s))
+            self.depth.setValue(DEFAULT_DEPTH)
+            self.role.setCurrentIndex(0)
             self.constant.setChecked(bool(s.get("constant", False)))
             self.enabled.setChecked(bool(s.get("enabled", True)) and not s.get("disable", False))
         finally:
@@ -583,6 +677,7 @@ class MainWindow(QMainWindow):
             "constant": self.constant.isChecked(),
             "enabled": self.enabled.isChecked(),
             "selectiveLogic": self.selective_logic.currentIndex(),
+            "position": (self.position.currentIndex(), self.depth.value(), self.role.currentIndex()),
             "content": raw_text(self.content),
         }
 
@@ -613,12 +708,38 @@ class MainWindow(QMainWindow):
             e["case_sensitive"] = value is True
         elif field == "content":
             e["content"] = _keep_line_endings(value, original.get("content"))
+        elif field == "position":
+            self._write_position(e, value, original)
         else:
             top, in_ext = FIELD_KEYS[field]
             for key in top:
                 e[key] = value
             for key in in_ext:
                 ext[key] = value
+
+    def _write_position(self, e, value, original):
+        """Группа position / depth / role. Пишется только то, что нужно SillyTavern для выбранного места."""
+        pos, depth, role = value
+        _, shown_depth, shown_role = self._shown_state["position"]
+        self._restore_field(e, "position", original)
+        if pos < 0:
+            return  # незнакомое значение из файла (Outlet и т.п.): не трогаем
+        e["position"] = pos
+        if pos != AT_DEPTH:
+            e["role"] = None  # как SillyTavern при выборе места не @ Depth; depth остаётся как был
+            return
+        # @ Depth: без depth SillyTavern вставляет запись с неопределённой глубиной.
+        if depth != shown_depth or _to_int(original.get("depth"), None) is None:
+            e["depth"] = depth
+        if role >= 0 and (role != shown_role or original.get("role") is None
+                          or _to_int(original.get("role"), None) is None):
+            e["role"] = role
+
+    def update_depth_fields(self, *args):
+        """Depth и Role нужны только месту @ Depth."""
+        show = self.position.currentIndex() == AT_DEPTH
+        for w in (self.depth_label, self.depth, self.role_label, self.role):
+            w.setVisible(show)
 
     @staticmethod
     def _restore_field(e, field, original):
@@ -717,7 +838,7 @@ class MainWindow(QMainWindow):
         # Без position SillyTavern запись включает, но её текст никуда не вставляет.
         # 0 — «перед персонажем», как у новой записи в самом ST. Существующее значение не трогаем.
         if e.get("position") is None:
-            e["position"] = 0
+            e["position"] = _default_position(s)
 
         kw = _first_list(e, "key", "keys")
         sk = _first_list(e, "secondary_keys", "keysecondary")
@@ -797,6 +918,7 @@ class MainWindow(QMainWindow):
         self.ids = []
         self.current_file = None
         self.dirty = False
+        self.clear_history()
 
         self.list.clear()
         self._loading = True
@@ -868,6 +990,7 @@ class MainWindow(QMainWindow):
             return
 
         self.current_file = p
+        self.clear_history()
         self._loading = True
         try:
             self.lorebook_name.setText(self.data["name"])
@@ -928,9 +1051,12 @@ class MainWindow(QMainWindow):
         existing = [int(x) for x in entries.keys() if str(x).isdigit()]
         nid = str(max(existing, default=0) + 1)
 
+        self.push_history()
         entry_name = self.app_settings.get("new_entry_name", "New Entry") or "New Entry"
         entry = {"uid": int(nid), "id": int(nid), "name": entry_name}
         self.normalize_entry(nid, entry)  # все значения по умолчанию берутся из Settings
+        if entry["position"] == AT_DEPTH:
+            entry["depth"], entry["role"] = DEFAULT_DEPTH, 0
         entries[nid] = entry
 
         self.sync_ids_from_entries()
@@ -951,6 +1077,7 @@ class MainWindow(QMainWindow):
         if old_eid not in entries:
             return
 
+        self.push_history()
         existing = [int(x) for x in entries.keys() if str(x).isdigit()]
         nid = str(max(existing, default=0) + 1)
 
@@ -978,12 +1105,13 @@ class MainWindow(QMainWindow):
         answer = QMessageBox.question(
             self,
             "Delete Entry",
-            f"Delete entry \"{name}\"? This cannot be undone.",
+            f"Delete entry \"{name}\"?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
         if answer != QMessageBox.Yes:
             return
+        self.push_history()
         entries = self.data.get("entries", {})
         if eid in entries:
             del entries[eid]
@@ -1002,29 +1130,96 @@ class MainWindow(QMainWindow):
         if 0 <= current < self.list.count():
             self.list.setCurrentRow(current)
 
+    # ---------- Undo / Redo ----------
+
+    def _snapshot(self):
+        entries = self.data.get("entries", {})
+        if not isinstance(entries, dict):
+            entries = {}
+        order = [entries[eid] for eid in self.ids if eid in entries]
+        order += [e for eid, e in entries.items() if eid not in self.ids]
+        item = self.list.currentItem()
+        eid = item.data(Qt.UserRole) if item is not None else None
+        current = entries.get(str(eid)) if eid is not None else None
+        return order, current
+
+    def push_history(self):
+        """Запомнить состояние перед действием со списком."""
+        self.history.append(self._snapshot())
+        del self.history[:-HISTORY_LIMIT]
+        self.future.clear()
+        self.update_undo_buttons()
+
+    def clear_history(self):
+        self.history.clear()
+        self.future.clear()
+        self.update_undo_buttons()
+
+    def update_undo_buttons(self):
+        self.btn_undo.setEnabled(bool(self.history))
+        self.btn_redo.setEnabled(bool(self.future))
+
+    def _restore(self, state):
+        order, current = state
+        if self.search.text():
+            self.search.clear()  # иначе возвращённая запись может оказаться скрыта поиском
+        self.data["entries"] = {str(i): e for i, e in enumerate(order, start=1)}
+        self.ids = list(self.data["entries"].keys())
+        self.renumber_uids()
+        self.dirty = True
+        self.update_title()
+        self.refresh()
+        row = next((i for i, e in enumerate(order) if e is current), None)
+        if row is None and self.list.count() > 0:
+            row = 0
+        if row is not None:
+            self.list.setCurrentRow(row)
+        self.update_undo_buttons()
+
+    def undo(self):
+        if self.history:
+            self.future.append(self._snapshot())
+            self._restore(self.history.pop())
+
+    def redo(self):
+        if self.future:
+            self.history.append(self._snapshot())
+            self._restore(self.future.pop())
+
     # ---------- Ordering ----------
 
-    def move_up(self):
+    def _visible_neighbor(self, row, step):
+        """Ближайшая видимая (не скрытая поиском) строка выше (step=-1) или ниже (step=1); None — нет."""
+        i = row + step
+        while 0 <= i < min(self.list.count(), len(self.ids)):
+            item = self.list.item(i)
+            if item is not None and not item.isHidden():
+                return i
+            i += step
+        return None
+
+    def _swap_with_neighbor(self, step):
         r = self.list.currentRow()
-        if r <= 0:
+        if r < 0 or r >= len(self.ids):
             return
-        self.ids[r - 1], self.ids[r] = self.ids[r], self.ids[r - 1]
+        # С поиском соседняя запись может быть скрыта: меняемся с ближайшей видимой,
+        # иначе на экране ничего не сдвинется, а порядок в файле поменяется.
+        j = self._visible_neighbor(r, step)
+        if j is None:
+            return
+        self.push_history()
+        self.ids[j], self.ids[r] = self.ids[r], self.ids[j]
         self.renumber_uids()
         self.dirty = True
         self.update_title()
         self.refresh()
-        self.list.setCurrentRow(r - 1)
+        self.list.setCurrentRow(j)
+
+    def move_up(self):
+        self._swap_with_neighbor(-1)
 
     def move_down(self):
-        r = self.list.currentRow()
-        if r < 0 or r >= len(self.ids) - 1:
-            return
-        self.ids[r + 1], self.ids[r] = self.ids[r], self.ids[r + 1]
-        self.renumber_uids()
-        self.dirty = True
-        self.update_title()
-        self.refresh()
-        self.list.setCurrentRow(r + 1)
+        self._swap_with_neighbor(1)
 
     def on_rows_moved(self, *args):
         """Drag & drop внутри списка. Перестраивать список прямо в обработчике сигнала нельзя:
@@ -1037,7 +1232,14 @@ class MainWindow(QMainWindow):
         self._reorder_pending = False
         try:
             current = self.list.currentRow()
+            before = self._snapshot()
             self.sync_ids_from_list_widget()
+            after = [self.data["entries"].get(eid) for eid in self.ids]
+            if len(after) != len(before[0]) or any(a is not b for a, b in zip(before[0], after)):
+                self.history.append(before)
+                del self.history[:-HISTORY_LIMIT]
+                self.future.clear()
+                self.update_undo_buttons()
             self.renumber_uids()
             self.dirty = True
             self.update_title()
@@ -1065,7 +1267,7 @@ class MainWindow(QMainWindow):
         new_ids = []
 
         for new_pos, old_eid in enumerate(order, start=1):
-            entry = dict(old_entries[old_eid])  # copy
+            entry = old_entries[old_eid]  # тот же объект: на него ссылаются снимки Undo
             new_key = str(new_pos)
 
             entry["uid"] = new_pos

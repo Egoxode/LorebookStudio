@@ -21,6 +21,7 @@ DEFAULTS = {
     "useProbability": True,
     "addMemo": True,
     "selectiveLogic": 0,
+    "position": 0,
 }
 
 
@@ -31,6 +32,22 @@ RANGES = {
     "probability": (0, 100),
 }
 
+
+# Места вставки (поле position) в SillyTavern: значение поля = индекс в списке.
+# 7 (Outlet) не показывается: такая запись открывается с пустым полем и не меняется.
+POSITIONS = [
+    "Before Char Defs", "After Char Defs", "Before Author's Note", "After Author's Note",
+    "@ Depth", "Before Example Messages", "After Example Messages",
+]
+AT_DEPTH = 4
+DEFAULT_DEPTH = 4  # как у SillyTavern
+DEPTH_RANGE = (0, 1000)  # как в редакторе SillyTavern
+ROLES = ["System", "User", "Assistant"]
+POSITION_HINT = (
+    "Where the content is inserted in the prompt: before or after the character definitions, "
+    "before or after the Author's Note or the example messages, or @ Depth: inside the chat history, "
+    "Depth messages from the end, sent as Role."
+)
 
 # Режимы Selective Logic в SillyTavern: значение поля = индекс в списке.
 SELECTIVE_LOGIC = ["AND ANY", "NOT ALL", "NOT ANY", "AND ALL"]
@@ -175,10 +192,15 @@ class SettingsDialog(QDialog):
         self.exclude_recursion.setChecked(bool(self.settings.get("excludeRecursion", False)))
         self.use_probability = QCheckBox()
         self.use_probability.setChecked(bool(self.settings.get("useProbability", True)))
+        self.position = QComboBox()
+        self.position.addItems(POSITIONS)
+        pos = _as_int(self.settings.get("position", 0), 0)
+        self.position.setCurrentIndex(pos if 0 <= pos < len(POSITIONS) else 0)
 
         for label, widget, text in [
             ("Name", self.new_entry_name, "Display name of this entry. Also saved as comment for other editors."),
             ("Insertion Order", self.insertion_order, "If multiple entries are inserted, lower Insertion Order is inserted higher."),
+            ("Position", self.position, POSITION_HINT + f" New @ Depth entries get Depth {DEFAULT_DEPTH} and Role System."),
             ("Case Sensitive", self.case_sensitive, CASE_SENSITIVE_HINT),
             ("Non-recursable", self.exclude_recursion, "Prevent this entry from being activated by other lorebook entries."),
             ("Selective", self.selective, "Require both keywords and secondary keywords to trigger the entry."),
@@ -213,4 +235,5 @@ class SettingsDialog(QDialog):
             "excludeRecursion": self.exclude_recursion.isChecked(),
             "useProbability": self.use_probability.isChecked(),
             "addMemo": True,
+            "position": self.position.currentIndex(),
         }

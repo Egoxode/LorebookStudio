@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.7
+
+### Added
+- Position: where the entry is inserted in the prompt, as in SillyTavern: before or after the character definitions, before or after the Author's Note, before or after the example messages, or @ Depth. For @ Depth, Depth (0–1000) and Role (System, User, Assistant) appear next to it. The position for new entries is set in Settings (default: before the character definitions, as before). Outlet and unknown values from a file are shown empty and kept unchanged.
+- Undo / Redo for list actions: add, clone, delete, move (▲ / ▼, drag and drop), up to 100 steps. Buttons under Delete; `Ctrl+Z` / `Ctrl+Y` when the list has focus (in a text field they undo typing as before). Text typed after an action is kept when the action is undone. History is cleared by Open and New.
+
+### Fixed
+- A regex keyword with a comma inside (`/cat{1,2}nip/i`) was split into two broken keywords when the Keywords or Secondary Keywords field was edited. Keywords are now split like SillyTavern does it: a comma inside `/…/flags` does not split.
+- ▲ / ▼ with an active search swapped the entry with a hidden neighbour: nothing moved on screen, but the order in the file changed. They now swap with the nearest visible entry.
+
 ## 1.0.6
 
 ### Changed
