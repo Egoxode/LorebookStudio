@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.8
+
+### Fixed
+- A file dropped on the window with Shift held (or Alt, Ctrl+Shift) was accepted as "moved" or "linked" instead of "copied". After a "move", Windows Explorer may delete the original file, thinking the program has taken it. A dropped file is now always accepted as copied: the program only reads it.
+
 ## 1.0.7
 
 ### Added

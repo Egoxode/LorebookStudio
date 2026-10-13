@@ -390,7 +390,10 @@ class MainWindow(QMainWindow):
                     # Открываем после завершения drop: окно с вопросом внутри обработчика
                     # заблокировало бы Проводник, из которого тащат файл.
                     QTimer.singleShot(0, lambda: self.open_dropped(path))
-                event.acceptProposedAction()
+                # Всегда «скопировано»: с Shift система предлагает «переместить», и Проводник Windows
+                # после такого ответа может удалить исходный файл. Программа файл только читает.
+                event.setDropAction(Qt.DropAction.CopyAction)
+                event.accept()
                 return True
         return super().eventFilter(obj, event)
 
