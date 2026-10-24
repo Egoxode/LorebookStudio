@@ -1,4 +1,5 @@
 import re
+import html
 import sys
 import copy
 import json
@@ -285,7 +286,7 @@ class MainWindow(QMainWindow):
         self.content = QTextEdit()
         self.content.setAcceptRichText(False)
         self.counter_label = QLabel("Characters: 0 | Tokens: 0")
-        self.lorebook_stats_label = QLabel("Lorebook Statistics: Entries 0 | Characters 0 | Tokens 0")
+        self.lorebook_stats_label = QLabel("Entries: 0 | Characters: 0 | Tokens: 0")
 
         self.preview_timer = QTimer(self)
         self.preview_timer.setSingleShot(True)
@@ -306,36 +307,61 @@ class MainWindow(QMainWindow):
         self.depth.valueChanged.connect(self.current_save)
         self.role.currentIndexChanged.connect(self.current_save)
 
-        field_hints = [
-            ("Name", self.name, "Display name of this entry. Also saved as comment for other editors."),
-            ("Keywords", self.keys, "The keys that activate the content."),
-            ("Secondary Keywords", self.secondary, "Additional keys required to activate the content. Ignored if Selective is off."),
-            ("Insertion Order", self.insertion_order, "If multiple entries are inserted, lower Insertion Order is inserted higher."),
-            ("Position", position_box, POSITION_HINT),
-            ("Case Sensitive", self.case_sensitive, CASE_SENSITIVE_HINT),
-            ("Non-recursable", self.exclude_recursion, "Prevent this entry from being activated by other lorebook entries."),
-            ("Selective", self.selective, "Require both keywords and secondary keywords to trigger the entry."),
-            ("Selective Logic", self.selective_logic, SELECTIVE_LOGIC_HINT),
-            ("Constant", self.constant, "Always trigger this entry (within the token budget)."),
-            ("Probability", self.probability, "Percent chance the content is activated when the entry is triggered."),
-            ("Enabled", self.enabled, "Turns this entry on. If unchecked, the entry will not activate."),
-            ("Content", self.content, "The content that gets activated and sent to the AI."),
-            ("Statistics", self.counter_label, "Character and token count for this entry."),
-            ("Lorebook Statistics", self.lorebook_stats_label, "Totals for the whole lorebook."),
-        ]
+        # Подсказки — во всплывающих окнах (на поле и на его подписи), а не строками под полями:
+        # так над Content остаётся пять строк, и почти вся высота уходит тексту записи.
+        # <p> — чтобы длинная подсказка переносилась по словам, а не тянулась в одну строку.
+        def hint(widget, text):
+            widget.setToolTip(f"<p>{html.escape(text, quote=False)}</p>")
 
-        for label, widget, hint in field_hints:
+        def label(text, widget, tip):
+            lab = QLabel(text)
+            hint(lab, tip)
+            hint(widget, tip)
+            return lab
+
+        def row(*items):
+            """Виджеты в одну строку: None — промежуток, (виджет, 1) — растягивается."""
             box = QWidget()
-            box_layout = QVBoxLayout(box)
-            box_layout.setContentsMargins(0, 0, 0, 0)
-            box_layout.setSpacing(2)
-            box_layout.addWidget(widget)
-            hint_label = QLabel(hint)
-            hint_label.setWordWrap(True)
-            hint_label.setStyleSheet("color: #888; font-size: 11px;")
-            box_layout.addWidget(hint_label)
-            form.addRow(label, box)
-            widget.setToolTip(hint)
+            line = QHBoxLayout(box)
+            line.setContentsMargins(0, 0, 0, 0)
+            for item in items:
+                if item is None:
+                    line.addSpacing(16)
+                elif isinstance(item, tuple):
+                    line.addWidget(*item)
+                else:
+                    line.addWidget(item)
+            return box
+
+        for box, text, tip in (
+            (self.enabled, "Enabled", "Turns this entry on. If unchecked, the entry will not activate."),
+            (self.constant, "Constant", "Always trigger this entry (within the token budget)."),
+            (self.selective, "Selective", "Require both keywords and secondary keywords to trigger the entry."),
+            (self.case_sensitive, "Case Sensitive", CASE_SENSITIVE_HINT),
+            (self.exclude_recursion, "Non-recursable", "Prevent this entry from being activated by other lorebook entries."),
+        ):
+            box.setText(text)
+            hint(box, tip)
+
+        form.addRow(label("Name", self.name, "Display name of this entry. Also saved as comment for other editors."), self.name)
+        form.addRow(label("Keywords", self.keys, "The keys that activate the content."), self.keys)
+        form.addRow(label("Secondary Keywords", self.secondary,
+                          "Additional keys required to activate the content. Ignored if Selective is off."), self.secondary)
+        form.addRow(
+            label("Insertion Order", self.insertion_order,
+                  "If multiple entries are inserted, lower Insertion Order is inserted higher."),
+            row(self.insertion_order, None,
+                label("Probability", self.probability, "Percent chance the content is activated when the entry is triggered."),
+                self.probability, None,
+                label("Position", self.position, POSITION_HINT), (position_box, 1)))
+        form.addRow("", row(self.enabled, None, self.constant, None,
+                            self.selective, label("Logic", self.selective_logic, SELECTIVE_LOGIC_HINT), self.selective_logic, None,
+                            self.case_sensitive, None, self.exclude_recursion, (QWidget(), 1)))
+        form.addRow(label("Content", self.content, "The content that gets activated and sent to the AI."), self.content)
+        form.addRow(label("Statistics", self.counter_label, "Character and token count for this entry."),
+                    row(self.counter_label, (QWidget(), 1),
+                        label("Lorebook:", self.lorebook_stats_label, "Totals for the whole lorebook."),
+                        self.lorebook_stats_label))
 
         self.preview = QTextBrowser()
         tabs.addTab(editor, "Editor")

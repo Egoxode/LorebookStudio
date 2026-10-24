@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.9
+
+### Changed
+- The editor is compact, so Content gets most of the window. The gray hints under the fields are gone; the same text appears when you hover a field or its name. Insertion Order, Probability and Position (with Depth and Role) share one row; Enabled, Constant, Selective with its Logic, Case Sensitive and Non-recursable share another; entry and lorebook statistics are one line under Content. Tab moves through the fields in the new screen order. Fields, values and saving are unchanged.
+
 ## 1.0.8
 
 ### Fixed
