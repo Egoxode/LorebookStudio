@@ -13,7 +13,7 @@ QWidget {{
     color: #ddd;
 }}
 
-QLineEdit, QTextEdit, QListWidget, QComboBox, QTextBrowser, QScrollArea, QDialog {{
+QLineEdit, QTextEdit, QListWidget, QComboBox, QTextBrowser, QScrollArea {{
     background: #2b2b2b;
     color: white;
     border: 1px solid #444;

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.14
+
+### Fixed
+- A message box (a question, a warning, an error) had dark patches behind its text and icon: the dialog had a lighter background than the widgets inside it. The same in Settings: its title line and the list of settings were darker than the window frame. Dialogs now have the same background as the main window.
+
 ## 1.0.13
 
 ### Fixed
