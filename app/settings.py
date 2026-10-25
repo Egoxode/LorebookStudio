@@ -7,6 +7,8 @@ from PySide6.QtWidgets import (
     QScrollArea, QSizePolicy
 )
 
+from .storage import save_json
+
 
 DEFAULTS = {
     "new_entry_name": "New Entry",
@@ -80,10 +82,11 @@ def state_case(state):
     return None
 
 
-def _as_int(value, default: int) -> int:
+def _to_int(value, default):
+    """Безопасное int(): None, строки и мусор из чужих файлов не должны ронять редактор."""
     try:
-        return int(value)
-    except (TypeError, ValueError):
+        return int(float(value))
+    except (TypeError, ValueError, OverflowError):
         return default
 
 
@@ -113,8 +116,8 @@ def load_settings() -> dict:
 def save_settings(data: dict) -> None:
     merged = dict(DEFAULTS)
     merged.update(data)
-    path = settings_path()
-    path.write_text(json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
+    # Через временный файл: сбой при записи не оставит пустой settings.json.
+    save_json(settings_path(), merged)
 
 
 def _hinted(widget, hint: str) -> QWidget:
@@ -166,15 +169,15 @@ class SettingsDialog(QDialog):
 
         self.insertion_order = QSpinBox()
         self.insertion_order.setRange(*RANGES["insertion_order"])
-        self.insertion_order.setValue(_as_int(self.settings.get("insertion_order", 100), 100))
+        self.insertion_order.setValue(_to_int(self.settings.get("insertion_order", 100), 100))
 
         self.probability = QSpinBox()
         self.probability.setRange(*RANGES["probability"])
-        self.probability.setValue(_as_int(self.settings.get("probability", 100), 100))
+        self.probability.setValue(_to_int(self.settings.get("probability", 100), 100))
 
         self.selective_logic = QComboBox()
         self.selective_logic.addItems(SELECTIVE_LOGIC)
-        idx = _as_int(self.settings.get("selectiveLogic", 0), 0)
+        idx = _to_int(self.settings.get("selectiveLogic", 0), 0)
         self.selective_logic.setCurrentIndex(idx if 0 <= idx < len(SELECTIVE_LOGIC) else 0)
 
         self.enabled = QCheckBox()
@@ -194,7 +197,7 @@ class SettingsDialog(QDialog):
         self.use_probability.setChecked(bool(self.settings.get("useProbability", True)))
         self.position = QComboBox()
         self.position.addItems(POSITIONS)
-        pos = _as_int(self.settings.get("position", 0), 0)
+        pos = _to_int(self.settings.get("position", 0), 0)
         self.position.setCurrentIndex(pos if 0 <= pos < len(POSITIONS) else 0)
 
         for label, widget, text in [

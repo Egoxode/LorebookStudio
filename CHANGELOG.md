@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.0.13
+
+### Fixed
+- A JSON file with something in `entries` but no lorebook entries (`[1, 2, 3]`, `{"entries": 5}`) opened as an empty lorebook without a word. Now it is an error, and the current lorebook is not changed. An empty lorebook (`"entries": {}`) still opens.
+- Markdown Preview showed no-break spaces and line separators (U+2028) as they would look after a copy through the clipboard; now it uses the text exactly as in the Content field, like the counters.
+
+### Changed
+- Code cleanup, no change in behaviour: one question about unsaved changes for Open, New and closing the window (it was written three times); duplicate number helpers merged; an extra reordering step before saving removed (the renumbering already does it).
+
+## 1.0.12
+
+### Fixed
+- A lorebook with an entry key such as `²` (a digit character that is not 0-9) failed to open with an error, and the list kept showing the previous lorebook. Now such a key is treated as non-numeric.
+- Save: a name with another extension (`my.book`) was saved without `.json`. Now `.json` is added (`my.book.json`).
+- `Case Sensitive` in the third state (use the SillyTavern setting) looked exactly like an empty checkbox. Now it is a filled square inside the frame, as the README describes.
+- `settings.json` is written through a temporary file, like lorebooks: a failure while writing no longer leaves an empty file (after which the defaults were used without a word).
+
+### Changed
+- README: corrected the notes on `Depth` and `Role`, the `position` of entries that have none, and `addMemo`.
+
+## 1.0.11
+
+### Changed
+- Errors are written to `error.log` and shown in a message box however the program was started: before, only `LorebookStudio.pyw` did this, and with `python main.py` an error was only printed to the console, which may close at once. In the console the error is still printed too. The error handling is in `error_log.py`, used by both `main.py` and `LorebookStudio.pyw`.
+
+## 1.0.10
+
+### Changed
+- Errors that the program survives (updating the lorebook statistics, the label of the current entry, the order after drag and drop) are written to `error.log` next to the program, with the full error text. Before, they were only printed to the console, so with `LorebookStudio.pyw` they were lost. No message box is shown for them.
+
 ## 1.0.9
 
 ### Changed

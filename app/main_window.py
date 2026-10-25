@@ -1,8 +1,10 @@
 import re
 import html
 import sys
+import traceback
 import copy
 import json
+import error_log  # error_log.py рядом с main.py: общий для запуска через main.py и .pyw
 from markdown_it import MarkdownIt
 import shiboken6
 from PySide6.QtCore import QTimer, Qt, QEvent
@@ -18,7 +20,7 @@ from .theme import get_dark_theme
 from .storage import load_json, save_json
 from .settings import (
     load_settings, save_settings, SettingsDialog, RANGES, SELECTIVE_LOGIC, SELECTIVE_LOGIC_HINT,
-    CASE_SENSITIVE_HINT, case_state, state_case,
+    CASE_SENSITIVE_HINT, case_state, state_case, _to_int,
     POSITIONS, AT_DEPTH, DEFAULT_DEPTH, DEPTH_RANGE, ROLES, POSITION_HINT
 )
 
@@ -27,12 +29,10 @@ from .settings import (
 _MD = MarkdownIt("commonmark", {"breaks": True}).enable(["table", "strikethrough"])
 
 
-def _to_int(value, default):
-    """Безопасное int(): None, строки и мусор из чужих файлов не должны ронять редактор."""
-    try:
-        return int(float(value))
-    except (TypeError, ValueError, OverflowError):
-        return default
+def _num_key(key) -> bool:
+    """Ключ записи — число. isdigit() пропускает "²", на котором int() падает."""
+    key = str(key)
+    return key.isascii() and key.isdecimal()
 
 
 # Ключ-регулярка, как её понимает SillyTavern: /шаблон/флаги, косая черта внутри — только \\/.
@@ -145,6 +145,18 @@ def _not_lorebook_reason(obj):
 
 
 HISTORY_LIMIT = 100
+
+
+def error_log_path() -> Path:
+    """Тот же error.log, куда error_log.py пишет любые ошибки программы: рядом с программой."""
+    return Path(error_log.LOG)
+
+
+def log_error(where, ex):
+    """Ошибка, после которой программа работает дальше: в консоль — строка, как раньше, в error.log — полный текст.
+    Окно не показывается: при запуске через .pyw печать уходит в никуда, а лог остаётся."""
+    print(f"{where} error:", ex)
+    error_log.write(f"{where}\n{traceback.format_exc()}", error_log_path())
 
 
 def _default_position(settings) -> int:
@@ -446,7 +458,7 @@ class MainWindow(QMainWindow):
 
     def on_lorebook_name_changed(self, t):
         self.data["name"] = t
-        if getattr(self, "_loading", False):
+        if self._loading:
             return
         self.dirty = True
         self.update_title()
@@ -466,7 +478,7 @@ class MainWindow(QMainWindow):
         self.ids = [
             eid for eid, _ in sorted(
                 entries.items(),
-                key=lambda x: int(x[0]) if str(x[0]).isdigit() else 0
+                key=lambda x: int(x[0]) if _num_key(x[0]) else 0
             )
         ]
 
@@ -480,26 +492,6 @@ class MainWindow(QMainWindow):
                 if eid is not None:
                     new_ids.append(str(eid))
         self.ids = new_ids
-
-    def rebuild_entries_dict_order(self):
-        """Rebuild self.data['entries'] so keys follow the current visual order in self.ids.
-        This ensures the saved JSON has entries in the order the user arranged them."""
-        entries = self.data.get("entries", {})
-        if not isinstance(entries, dict):
-            return
-
-        ordered = {}
-        # First add entries in the order of self.ids
-        for eid in self.ids:
-            if eid in entries:
-                ordered[eid] = entries[eid]
-
-        # Then add any remaining entries that weren't in self.ids (safety)
-        for eid, e in entries.items():
-            if eid not in ordered:
-                ordered[eid] = e
-
-        self.data["entries"] = ordered
 
     # ---------- Core list management ----------
 
@@ -519,7 +511,7 @@ class MainWindow(QMainWindow):
         if not display_order:
             display_order = sorted(
                 entries.keys(),
-                key=lambda x: int(x) if str(x).isdigit() else 0
+                key=lambda x: int(x) if _num_key(x) else 0
             )
         self.ids = list(display_order)
 
@@ -623,9 +615,9 @@ class MainWindow(QMainWindow):
     def update_preview(self):
         try:
             # .strip(): перевод строки после последнего тега Qt показывает лишним пробелом в конце
-            self.preview.setHtml(_MD.render(self.content.toPlainText()).strip())
+            self.preview.setHtml(_MD.render(raw_text(self.content)).strip())
         except Exception:
-            self.preview.setPlainText(self.content.toPlainText())
+            self.preview.setPlainText(raw_text(self.content))
 
     def update_counter(self):
         chars = char_count(raw_text(self.content))
@@ -645,7 +637,7 @@ class MainWindow(QMainWindow):
                 f"Entries: {len(entries)} | Characters: {total_chars} | Tokens: {total_tokens}"
             )
         except Exception as ex:
-            print("update_lorebook_stats error:", ex)
+            log_error("update_lorebook_stats", ex)
 
     def update_current_item_info(self):
         """Обновить подпись текущего элемента списка по живым значениям редактора."""
@@ -662,7 +654,7 @@ class MainWindow(QMainWindow):
                 len(_first_list(e, "key", "keys")),
             ))
         except Exception as ex:
-            print("update_current_item_info error:", ex)
+            log_error("update_current_item_info", ex)
 
     def clear_editor(self):
         """Сбросить поля редактора к значениям по умолчанию (нет выбранной записи)."""
@@ -804,7 +796,7 @@ class MainWindow(QMainWindow):
                 self._restore_field(e, field, original)
 
     def current_save(self, *args):
-        if getattr(self, "_loading", False):
+        if self._loading:
             return
         r = self.list.currentRow()
         if r < 0 or r >= len(self.ids):
@@ -928,20 +920,8 @@ class MainWindow(QMainWindow):
 
     def new_lorebook(self):
         """Create a blank lorebook. Ask to save if there are unsaved changes."""
-        if self.dirty:
-            r = QMessageBox.question(
-                self,
-                "Unsaved Changes",
-                "Save changes before creating a new lorebook?",
-                QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
-                QMessageBox.Yes
-            )
-            if r == QMessageBox.Cancel:
-                return
-            if r == QMessageBox.Yes:
-                self.save_file()
-                if self.dirty:
-                    return  # user cancelled save dialog
+        if not self.confirm_unsaved("creating a new lorebook"):
+            return
 
         self.data = {"name": "Lorebook", "entries": {}}
         self.ids = []
@@ -971,13 +951,14 @@ class MainWindow(QMainWindow):
                     f"Settings are applied for this session, but could not be saved:\n{e}"
                 )
 
-    def confirm_unsaved(self):
-        """Вопрос о несохранённых правках перед открытием другого лорбука. False — отмена."""
+    def confirm_unsaved(self, action="opening another lorebook"):
+        """Вопрос о несохранённых правках перед открытием, новой книгой или закрытием.
+        False — отмена (Cancel или окно сохранения закрыто без сохранения)."""
         if self.dirty:
             r = QMessageBox.question(
                 self,
                 "Unsaved Changes",
-                "Save changes before opening another lorebook?",
+                f"Save changes before {action}?",
                 QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
                 QMessageBox.Yes
             )
@@ -1011,7 +992,15 @@ class MainWindow(QMainWindow):
                 self.data = {"name": "", "entries": loaded if isinstance(loaded, list) else {}}
             if not isinstance(self.data.get("name"), str):
                 self.data["name"] = ""
+            raw = self.data.get("entries")
             self.convert_entries_to_dict()
+            # [1, 2, 3], {"entries": 5}: в файле что-то есть, но записей нет — не подменяем книгу пустой.
+            if raw not in (None, [], {}) and not self.data["entries"]:
+                self.data = previous
+                QMessageBox.critical(self, "Not a lorebook",
+                                     f"No lorebook entries were found in this file.\n\n{Path(p).name}\n\n"
+                                     "The current lorebook was not changed.")
+                return
             self.normalize_entries()
         except Exception as e:
             self.data = previous
@@ -1038,7 +1027,6 @@ class MainWindow(QMainWindow):
         self.current_save()
 
         # Порядок списка и сплошные uid/id: 1, 2, 3...
-        self.rebuild_entries_dict_order()
         self.renumber_uids()
         self.convert_entries_to_dict()
 
@@ -1056,7 +1044,7 @@ class MainWindow(QMainWindow):
         p, _ = QFileDialog.getSaveFileName(self, "Save", name, "JSON (*.json)")
         if not p:
             return
-        if not Path(p).suffix:
+        if Path(p).suffix.lower() != ".json":  # "my.book" -> "my.book.json"
             p += ".json"
         try:
             save_json(p, self.data)
@@ -1077,7 +1065,7 @@ class MainWindow(QMainWindow):
             entries = {}
             self.data["entries"] = entries
 
-        existing = [int(x) for x in entries.keys() if str(x).isdigit()]
+        existing = [int(x) for x in entries.keys() if _num_key(x)]
         nid = str(max(existing, default=0) + 1)
 
         self.push_history()
@@ -1107,7 +1095,7 @@ class MainWindow(QMainWindow):
             return
 
         self.push_history()
-        existing = [int(x) for x in entries.keys() if str(x).isdigit()]
+        existing = [int(x) for x in entries.keys() if _num_key(x)]
         nid = str(max(existing, default=0) + 1)
 
         entries[nid] = copy.deepcopy(entries[old_eid])
@@ -1278,7 +1266,7 @@ class MainWindow(QMainWindow):
             elif self.list.count() > 0:
                 self.list.setCurrentRow(0)
         except Exception as ex:
-            print("on_rows_moved error:", ex)
+            log_error("on_rows_moved", ex)
 
     def renumber_uids(self):
         """Fully renumber entries: rebuild the entries dict with new sequential keys (1,2,3...)
@@ -1313,26 +1301,10 @@ class MainWindow(QMainWindow):
     # ---------- Close handling ----------
 
     def closeEvent(self, event):
-        if not self.dirty:
+        if self.confirm_unsaved("closing"):
             event.accept()
-            return
-        r = QMessageBox.question(
-            self,
-            "Unsaved Changes",
-            "Save changes before closing?",
-            QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
-            QMessageBox.Yes
-        )
-        if r == QMessageBox.Cancel:
-            event.ignore()
-        elif r == QMessageBox.Yes:
-            self.save_file()
-            if not self.dirty:
-                event.accept()
-            else:
-                event.ignore()
         else:
-            event.accept()
+            event.ignore()
 
 
 def run():

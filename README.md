@@ -2,7 +2,7 @@
 
 Desktop editor for SillyTavern / Chub lorebook JSON files.
 
-Version **1.0.9** ([changelog](CHANGELOG.md))
+Version **1.0.13** ([changelog](CHANGELOG.md))
 
 Lorebook Studio was made for convenient editing of lorebooks. You can freely use, copy, and modify this program.
 
@@ -117,7 +117,7 @@ py main.py
 
 ### Run without a console window (Windows)
 
-Double-click `LorebookStudio.pyw`. The program opens without the black console window. If something goes wrong, the error is shown in a message box and written to `error.log` next to the program.
+Double-click `LorebookStudio.pyw`. The program opens without the black console window. If something goes wrong, the error is shown in a message box and written to `error.log` next to the program. The same happens when you start the program with `python main.py` (or double-click `main.py`): errors are written to `error.log` and shown in a message box, and also printed in the console. Minor errors the program survives are only written to `error.log`, without a message box.
 
 ## Keyboard shortcuts
 
@@ -156,6 +156,7 @@ Make sure the `app/icons/` folder was downloaded: `up.png`, `down.png`, `check.p
 
 - The program saves `entries` as an object with string keys: `"1"`, `"2"`, `"3"`.
 - If you open an older lorebook where `entries` is a list, it is converted to this object format.
+- A file that has something in `entries` but no lorebook entries (for example a list of numbers) is not opened: you get an error, and the current lorebook stays as it was. A lorebook with empty `entries` opens as an empty lorebook.
 - This is the normal format for SillyTavern.
 - Some websites may change the file after upload and download. That is not controlled by this program.
 
@@ -191,11 +192,11 @@ Make sure the `app/icons/` folder was downloaded: `up.png`, `down.png`, `check.p
 - A `Selective Logic` value outside 0-3 (from an unusual file) is shown as an empty field and kept unchanged unless you pick a mode.
 - Token count is an estimate: characters / 4. It is not a model tokenizer. A line break counts as one character.
 - `Case Sensitive` has three states. Checked: keywords are case-sensitive. Empty: they are not. Filled square: use the SillyTavern setting (Case-sensitive in World Info settings); this is the default for new entries. The program writes `caseSensitive` (`true` / `false` / `null`), which SillyTavern reads, and `case_sensitive`.
-- `Depth` is not in the editor: in SillyTavern it is the insertion depth of entries placed @D (at depth), which this program does not set. A `depth` value already in the file is kept unchanged.
-- An entry without `position` gets `0` (before the character), as a new entry in SillyTavern.
+- `Depth` and `Role` are shown and written only for the `@ Depth` position. A new entry placed `@ Depth` gets depth 4 and role System, as in SillyTavern. For other positions a `depth` value already in the file is kept unchanged.
+- An entry without `position` gets the `Position` from Settings (by default before the character), so SillyTavern always inserts its text.
 - `Enabled` turns the entry on.
 - `Disable` is the SillyTavern counterpart of `Enabled`. The editor keeps them in sync (`disable = not enabled`), so a disabled entry is really off in both SillyTavern and Chub.
-- `addMemo` is always written as `true`. It does not control activation.
+- `addMemo` from the file is kept as it is; an entry without it gets `true`. It does not control activation.
 
 ### Settings file
 

@@ -100,6 +100,22 @@ QCheckBox::indicator:checked:hover {{
     border: 1px solid #a090ff;
 }}
 
+/* Третье состояние (Case Sensitive «как в ST»): заполненный квадрат внутри рамки.
+   Без этого правила оно выглядит как пустой флажок. Размер с отступом — те же 16px. */
+QCheckBox::indicator:indeterminate {{
+    width: 10px;
+    height: 10px;
+    padding: 3px;
+    border: 1px solid #8f7cff;
+    background: #6a5acd;
+    background-clip: content;
+}}
+
+QCheckBox::indicator:indeterminate:hover {{
+    border: 1px solid #a090ff;
+    background: #7b6bde;
+}}
+
 QPushButton {{
     background: #444;
     padding: 6px;
